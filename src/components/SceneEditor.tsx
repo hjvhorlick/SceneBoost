@@ -34,6 +34,7 @@ import {
   formatFileSize,
   formatYoutubeTagsCsv,
   generateYoutubeRankingTags,
+  makeUniqueVideoTitle,
   parseSceneringFiles,
   parseTagsInput,
   renderImageFileToYoutubeThumbnail,
@@ -52,6 +53,7 @@ import {
   loadGoogleOAuthClientId,
   saveGoogleOAuthClientId,
   snapshotExistingChannelVideoIds,
+  snapshotExistingChannelVideos,
   uploadPostDirectlyToYoutube,
   verifyStudioVideoUrlForPost,
 } from '../lib/youtube'
@@ -204,11 +206,14 @@ export default function SceneEditor({
             ...current.links.map((l) => ({ ...l, order: l.order + 1 })),
           ]
 
+      const finalTitle = ytTitle.trim() || current.title
       const updated: Scene = {
         ...current,
+        title: finalTitle,
+        slug: finalTitle !== current.title && !slugTouched ? slugify(finalTitle) : current.slug,
         videoUrl,
         youtubeVerified: true,
-        youtubeVideoTitle: ytTitle,
+        youtubeVideoTitle: finalTitle,
         youtubeFetchedAt: nowIso,
         status: 'live',
         links: nextLinks,
@@ -217,7 +222,7 @@ export default function SceneEditor({
       setDraft(updated)
       onSave(updated)
     },
-    [onSave]
+    [onSave, slugTouched]
   )
 
   // Strictly verify whether a BRAND-NEW video was uploaded to the YouTube channel
@@ -346,20 +351,30 @@ export default function SceneEditor({
   // Fetch video + credits + top part of description + thumbnail from Scenering folder
   const handleImportScenering = async (files: FileList | null) => {
     if (!files || files.length === 0) return
-    const imported = await parseSceneringFiles(files)
+    const [imported, channelSnap] = await Promise.all([
+      parseSceneringFiles(files),
+      snapshotExistingChannelVideos(data.platforms),
+    ])
     if (imported.videoFile) {
       setVideoFile(imported.videoFile)
       onRememberVideoFile?.(draft.id, imported.videoFile)
       void saveVideoFileForPost(draft.id, imported.videoFile)
     }
 
+    const otherPostTitles = data.scenes
+      .filter((s) => s.id !== draft.id)
+      .map((s) => s.title)
+
     setDraft((d) => {
       const shouldUpdateTitle =
         imported.title &&
         (!d.title.trim() || d.title === 'Untitled post' || d.title === 'Untitled scene')
-      const nextTitle = shouldUpdateTitle ? imported.title : d.title
-      const nextSlug =
-        shouldUpdateTitle && !slugTouched ? slugify(imported.title) : d.slug
+      const candidateTitle = shouldUpdateTitle ? imported.title : d.title
+      const nextTitle = makeUniqueVideoTitle(candidateTitle, [
+        ...otherPostTitles,
+        ...channelSnap.titles,
+      ])
+      const nextSlug = !slugTouched ? slugify(nextTitle) : d.slug
       const nextTopDesc = imported.shortDescription || extractTopDescription(d.description, 600)
       const nextCredits = imported.credits || d.credits
       const nextTags = generateYoutubeRankingTags({
@@ -388,6 +403,8 @@ export default function SceneEditor({
         tags: nextTags,
         videoFileName: imported.videoFileName || d.videoFileName,
         videoSizeBytes: imported.videoSizeBytes || d.videoSizeBytes,
+        knownChannelVideoIdsAtCreate:
+          channelSnap.ids.length > 0 ? channelSnap.ids : d.knownChannelVideoIdsAtCreate,
         thumbnail: nextThumb,
         thumbnailFileName: nextThumbName,
         thumbnailMissing: nextThumbMissing,
@@ -547,10 +564,14 @@ export default function SceneEditor({
     setYtUploadStage('Signing in & starting YouTube upload…')
     setYtStatusNote('')
     try {
+      const otherTitles = data.scenes
+        .filter((s) => s.id !== draft.id)
+        .map((s) => s.title)
       const created = await uploadPostDirectlyToYoutube({
         clientId: cleanClientId,
         videoFile,
         title: ytPack.title,
+        existingTitles: otherTitles,
         descriptionWithCredits: ytPack.descriptionWithCredits,
         tags: ytPack.tags,
         thumbnailDataUrl: hasRealThumbnail ? draft.thumbnail : undefined,
@@ -562,10 +583,12 @@ export default function SceneEditor({
       })
       applyFetchedYoutubeVideo(created.url, created.title)
       setShowOauthBox(false)
+      const renamedNote =
+        created.title !== ytPack.title ? ` as “${created.title}”` : ''
       setYtStatusNote(
-        `Uploaded & verified on YouTube (${created.url}) — placed into all social posts!`
+        `Uploaded & verified on YouTube${renamedNote} (${created.url}) — placed into all social posts!`
       )
-      notify(`Video uploaded & verified on YouTube (${created.url}) ✓`)
+      notify(`Video uploaded${renamedNote} & verified on YouTube (${created.url}) ✓`)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Direct YouTube upload failed'
       setYtStatusNote(`Upload did NOT complete: ${msg}`)

@@ -1,5 +1,5 @@
 import type { PlatformSettings, Scene } from '../types'
-import { extractYoutubeVideoId } from './scenering'
+import { extractYoutubeVideoId, makeUniqueVideoTitle } from './scenering'
 import { loadGeminiApiKey } from './gemini'
 
 export const DEFAULT_YOUTUBE_CHANNEL_ID = 'UCV9v30xQPdbhwM5lAZC2MRQ'
@@ -209,6 +209,7 @@ export interface DirectYoutubeUploadInput {
   clientId: string
   videoFile: File
   title: string
+  existingTitles?: string[]
   descriptionWithCredits: string
   tags: string[]
   thumbnailDataUrl?: string
@@ -216,9 +217,41 @@ export interface DirectYoutubeUploadInput {
   onStage?: (stage: string, percent: number) => void
 }
 
+async function fetchAuthenticatedChannelTitles(accessToken: string): Promise<string[]> {
+  try {
+    const chRes = await fetch(
+      'https://www.googleapis.com/youtube/v3/channels?part=contentDetails&mine=true',
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    )
+    if (!chRes.ok) return []
+    const chJson = (await chRes.json()) as {
+      items?: Array<{ contentDetails?: { relatedPlaylists?: { uploads?: string } } }>
+    }
+    const uploadsId = chJson.items?.[0]?.contentDetails?.relatedPlaylists?.uploads
+    if (!uploadsId) return []
+
+    const plRes = await fetch(
+      `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${encodeURIComponent(
+        uploadsId
+      )}&maxResults=50`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    )
+    if (!plRes.ok) return []
+    const plJson = (await plRes.json()) as {
+      items?: Array<{ snippet?: { title?: string } }>
+    }
+    return (plJson.items ?? [])
+      .map((it) => it.snippet?.title?.trim() || '')
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 /**
  * Uploads the actual video file + title + script/complete credit document + SEO tags +
- * 1280x720 thumbnail to YouTube via YouTube Data API v3, then VERIFIES on YouTube's
+ * 1280x720 thumbnail to YouTube via YouTube Data API v3, automatically appending `1` or `2`
+ * if a video with the same name already exists on the channel, then VERIFIES on YouTube's
  * servers that the video (`videos?id=<newId>`) genuinely exists before returning its
  * `https://youtu.be/<videoId>` URL.
  */
@@ -226,6 +259,7 @@ export async function uploadPostDirectlyToYoutube({
   clientId,
   videoFile,
   title,
+  existingTitles = [],
   descriptionWithCredits,
   tags,
   thumbnailDataUrl,
@@ -239,7 +273,11 @@ export async function uploadPostDirectlyToYoutube({
   onStage?.('Signing in to YouTube…', 2)
   const accessToken = await requestYoutubeAccessToken(clientId)
 
-  onStage?.('Creating new video post on YouTube…', 5)
+  onStage?.('Checking channel for duplicate video names…', 4)
+  const channelTitles = await fetchAuthenticatedChannelTitles(accessToken)
+  const uniqueTitle = makeUniqueVideoTitle(title, [...existingTitles, ...channelTitles], 100)
+
+  onStage?.(`Creating “${uniqueTitle}” on YouTube…`, 5)
   const initRes = await fetch(
     'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
     {
@@ -252,7 +290,7 @@ export async function uploadPostDirectlyToYoutube({
       },
       body: JSON.stringify({
         snippet: {
-          title: title.trim().slice(0, 100) || 'Untitled Video',
+          title: uniqueTitle,
           description: descriptionWithCredits.slice(0, 4950),
           tags: tags.slice(0, 35),
           categoryId: '22',
@@ -372,7 +410,7 @@ export async function uploadPostDirectlyToYoutube({
   onStage?.('Verified on YouTube! Placing video URL into all social posts…', 100)
   return {
     videoId: createdVideo.id,
-    title: verifiedItem.snippet?.title || createdVideo.snippet?.title || title.trim(),
+    title: verifiedItem.snippet?.title || createdVideo.snippet?.title || uniqueTitle,
     url: `https://youtu.be/${createdVideo.id}`,
     publishedAt:
       verifiedItem.snippet?.publishedAt ||
@@ -580,16 +618,26 @@ export async function fetchChannelRecentVideos(
  * post is uploaded, so SceneBoost can NEVER mistake an old channel video for a
  * newly posted video.
  */
-export async function snapshotExistingChannelVideoIds(
+export async function snapshotExistingChannelVideos(
   platforms?: PlatformSettings[]
-): Promise<string[]> {
+): Promise<{ ids: string[]; titles: string[] }> {
   try {
     const channelId = extractYoutubeChannelId(platforms)
     const { videos } = await fetchChannelRecentVideos(channelId)
-    return videos.map((v) => v.videoId).filter(Boolean)
+    return {
+      ids: videos.map((v) => v.videoId).filter(Boolean),
+      titles: videos.map((v) => v.title).filter(Boolean),
+    }
   } catch {
-    return []
+    return { ids: [], titles: [] }
   }
+}
+
+export async function snapshotExistingChannelVideoIds(
+  platforms?: PlatformSettings[]
+): Promise<string[]> {
+  const snap = await snapshotExistingChannelVideos(platforms)
+  return snap.ids
 }
 
 /**

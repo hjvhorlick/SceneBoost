@@ -11,12 +11,13 @@ import PublicHub from './components/PublicHub'
 import { Modal, Toast } from './components/ui'
 import {
   generateYoutubeRankingTags,
+  makeUniqueVideoTitle,
   parseSceneringFiles,
   renderImageFileToYoutubeThumbnail,
 } from './lib/scenering'
 import { loadData, saveData, resetData } from './lib/store'
 import { deleteVideoFileForPost, saveVideoFileForPost } from './lib/videoStore'
-import { snapshotExistingChannelVideoIds } from './lib/youtube'
+import { snapshotExistingChannelVideos } from './lib/youtube'
 import { slugify, uid } from './lib/utils'
 import type { AppData, PlatformId, Scene, SceneLink } from './types'
 
@@ -122,7 +123,9 @@ export default function App() {
   }, [data.platforms])
 
   const createScene = () => {
-    const title = newTitle.trim() || 'Untitled post'
+    const rawTitle = newTitle.trim() || 'Untitled post'
+    const existingPostTitles = data.scenes.map((s) => s.title)
+    const title = makeUniqueVideoTitle(rawTitle, existingPostTitles)
     const slugBase = slugify(title)
     const exists = data.scenes.some((s) => s.slug === slugBase)
     const sceneId = uid()
@@ -150,32 +153,52 @@ export default function App() {
         ...d.activity,
       ].slice(0, 20),
     }))
-    // Snapshot existing channel video IDs so old videos on your channel can never be mistaken for a new upload
-    void snapshotExistingChannelVideoIds(data.platforms).then((existingIds) => {
-      if (existingIds.length > 0) {
-        setData((d) => ({
+    // Snapshot existing channel videos & also append `1` / `2` if the channel already has a video with the same name
+    void snapshotExistingChannelVideos(data.platforms).then((channelSnap) => {
+      if (channelSnap.ids.length === 0 && channelSnap.titles.length === 0) return
+      setData((d) => {
+        const otherTitles = d.scenes.filter((s) => s.id !== sceneId).map((s) => s.title)
+        return {
           ...d,
-          scenes: d.scenes.map((s) =>
-            s.id === sceneId ? { ...s, knownChannelVideoIdsAtCreate: existingIds } : s
-          ),
-        }))
-      }
+          scenes: d.scenes.map((s) => {
+            if (s.id !== sceneId) return s
+            const dedupedTitle = makeUniqueVideoTitle(s.title, [
+              ...otherTitles,
+              ...channelSnap.titles,
+            ])
+            return {
+              ...s,
+              title: dedupedTitle,
+              slug: dedupedTitle !== s.title ? slugify(dedupedTitle) : s.slug,
+              knownChannelVideoIdsAtCreate: channelSnap.ids,
+            }
+          }),
+        }
+      })
     })
     setShowCreate(false)
     setNewTitle('')
     setNewThumbDataUrl('')
     setNewThumbName('')
-    notify('Post created as Draft — upload or verify on YouTube to go Live')
+    notify(
+      title !== rawTitle
+        ? `Named “${title}” (a video with that name already exists) — ready to upload`
+        : 'Post created as Draft — upload or verify on YouTube to go Live'
+    )
     navigate('editor', scene.id)
   }
 
   const createSceneFromScenering = async (files: FileList | null) => {
     if (!files || files.length === 0) return
-    const [imported, existingChannelIds] = await Promise.all([
+    const [imported, channelSnap] = await Promise.all([
       parseSceneringFiles(files),
-      snapshotExistingChannelVideoIds(data.platforms),
+      snapshotExistingChannelVideos(data.platforms),
     ])
-    const title = (newTitle.trim() || imported.title || 'Untitled post').trim()
+    const rawTitle = (newTitle.trim() || imported.title || 'Untitled post').trim()
+    const title = makeUniqueVideoTitle(rawTitle, [
+      ...data.scenes.map((s) => s.title),
+      ...channelSnap.titles,
+    ])
     const slugBase = slugify(title)
     const exists = data.scenes.some((s) => s.slug === slugBase)
     const hasThumb = Boolean(newThumbDataUrl || imported.thumbnailFoundInFolder)
@@ -198,7 +221,7 @@ export default function App() {
       thumbnailMissing: !hasThumb,
       videoUrl: '',
       youtubeVerified: false,
-      knownChannelVideoIdsAtCreate: existingChannelIds,
+      knownChannelVideoIdsAtCreate: channelSnap.ids,
       status: 'draft',
       accent: data.settings.accent,
       createdAt: new Date().toISOString(),
@@ -217,10 +240,11 @@ export default function App() {
     setNewTitle('')
     setNewThumbDataUrl('')
     setNewThumbName('')
+    const renameHint = title !== rawTitle ? ` (named “${title}” since “${rawTitle}” already exists)` : ''
     notify(
       hasThumb
-        ? 'Folder loaded — now upload the video to YouTube to go Live'
-        : 'Folder loaded — upload a thumbnail in Item 3, then upload to YouTube'
+        ? `Folder loaded${renameHint} — now upload the video to YouTube to go Live`
+        : `Folder loaded${renameHint} — upload a thumbnail in Item 3, then upload to YouTube`
     )
     navigate('editor', scene.id)
   }

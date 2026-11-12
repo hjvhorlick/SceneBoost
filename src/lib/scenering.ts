@@ -112,6 +112,56 @@ function cleanTitleFromName(raw: string): string {
     .trim()
 }
 
+/**
+ * If a video or post already exists with the same name (on YouTube or in SceneBoost),
+ * appends ` 1`, ` 2`, ` 3`, … at the end so every upload gets a clean unique name
+ * without ever blocking or colliding with an earlier video.
+ */
+export function makeUniqueVideoTitle(
+  desiredTitle: string,
+  existingTitles: Iterable<string>,
+  maxLen = 100
+): string {
+  const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase()
+  const taken = new Set<string>()
+  for (const t of existingTitles) {
+    const n = norm(t)
+    if (n) taken.add(n)
+  }
+
+  const clean = desiredTitle.trim().replace(/\s+/g, ' ') || 'Untitled Video'
+  const capped = clean.length <= maxLen ? clean : clean.slice(0, maxLen).trim()
+
+  if (!taken.has(norm(capped))) {
+    return capped
+  }
+
+  // If `capped` already ends with ` <n>` AND the base without ` <n>` ALSO exists,
+  // increment from that base instead of producing `Title 1 1`.
+  let base = capped
+  let n = 1
+  const trailingNum = capped.match(/^(.*?)\s+(\d+)$/)
+  if (trailingNum && trailingNum[1] && taken.has(norm(trailingNum[1]))) {
+    base = trailingNum[1].trim()
+    n = Math.max(1, Number(trailingNum[2]) + 1)
+  }
+
+  while (n < 1000) {
+    const suffix = ` ${n}`
+    const trimmedBase =
+      base.length + suffix.length <= maxLen
+        ? base
+        : base.slice(0, Math.max(1, maxLen - suffix.length)).trim()
+    const candidate = `${trimmedBase}${suffix}`
+    if (!taken.has(norm(candidate))) {
+      return candidate
+    }
+    n++
+  }
+
+  return `${base.slice(0, maxLen - 5).trim()} ${Date.now() % 1000}`
+}
+
 export const SCENERING_WEBSITE_URL = 'https://scenering.com'
 
 /**
