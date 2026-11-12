@@ -1,13 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
   ArrowLeft,
   Save,
   Trash2,
-  Plus,
-  Link2,
   Eye,
-  GripVertical,
-  X,
   Check,
   ExternalLink,
   Copy,
@@ -20,9 +16,11 @@ import {
   Share2,
   KeyRound,
   RefreshCw,
+  Lock,
+  Globe,
 } from 'lucide-react'
-import type { AppData, PlatformId, Scene, SceneLink } from '../types'
-import { PLATFORMS, COVER_THEMES, ACCENTS, coverStyle, platformById } from '../lib/platforms'
+import type { AppData, Scene, SceneLink } from '../types'
+import { COVER_THEMES, ACCENTS, coverStyle } from '../lib/platforms'
 import {
   SOCIAL_BOOST_PLATFORMS,
   PLATFORM_COMPOSER_LINKS,
@@ -33,7 +31,6 @@ import {
   formatFileSize,
   formatYoutubeTagsCsv,
   generateYoutubeRankingTags,
-  isSpecificYoutubeVideoUrl,
   parseSceneringFiles,
   parseTagsInput,
   renderImageFileToYoutubeThumbnail,
@@ -45,7 +42,11 @@ import {
   loadGeminiApiKey,
   saveGeminiApiKey,
 } from '../lib/gemini'
-import { buildTrackedUrl, copyText, hubUrl, slugify, uid } from '../lib/utils'
+import {
+  autoFetchYoutubeVideoForPost,
+  extractYoutubeChannelId,
+} from '../lib/youtube'
+import { copyText, slugify, timeAgo, uid } from '../lib/utils'
 import { Badge, PlatformPill } from './ui'
 
 interface Props {
@@ -90,6 +91,13 @@ export default function SceneEditor({
   const [showGeminiKeyBox, setShowGeminiKeyBox] = useState(false)
   const [geminiBusy, setGeminiBusy] = useState(false)
 
+  // Automated YouTube fetch state
+  const [ytChecking, setYtChecking] = useState(false)
+  const [ytStatusNote, setYtStatusNote] = useState<string>('')
+  const checkingRef = useRef(false)
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+
   const folderInputRef = useRef<HTMLInputElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const thumbInputRef = useRef<HTMLInputElement | null>(null)
@@ -97,6 +105,7 @@ export default function SceneEditor({
   useEffect(() => {
     setDraft(scene)
     setSlugTouched(false)
+    setYtStatusNote('')
     const initialTags =
       scene.tags && scene.tags.length > 0
         ? scene.tags
@@ -125,6 +134,136 @@ export default function SceneEditor({
     notify(ok ? `${label} copied ✓` : 'Copy failed — select the text manually')
     setTimeout(() => setCopied(null), 1800)
   }
+
+  // Apply an automatically fetched YouTube video URL onto the post (no manual choice)
+  const applyFetchedYoutubeVideo = useCallback(
+    (videoUrl: string, ytTitle: string) => {
+      const nowIso = new Date().toISOString()
+      const current = draftRef.current
+      const hasYtLink = current.links.some((l) => l.platform === 'youtube')
+      const nextLinks: SceneLink[] = hasYtLink
+        ? current.links.map((l, idx) =>
+            l.platform === 'youtube' &&
+            idx === current.links.findIndex((x) => x.platform === 'youtube')
+              ? { ...l, url: videoUrl, enabled: true, label: 'Watch Full Video on YouTube' }
+              : l
+          )
+        : [
+            {
+              id: uid(),
+              platform: 'youtube',
+              label: 'Watch Full Video on YouTube',
+              url: videoUrl,
+              enabled: true,
+              clicks: 0,
+              order: 0,
+            },
+            ...current.links.map((l) => ({ ...l, order: l.order + 1 })),
+          ]
+
+      const updated: Scene = {
+        ...current,
+        videoUrl,
+        youtubeVideoTitle: ytTitle,
+        youtubeFetchedAt: nowIso,
+        status: 'live',
+        links: nextLinks,
+        updatedAt: nowIso,
+      }
+      setDraft(updated)
+      onSave(updated)
+    },
+    [onSave]
+  )
+
+  // Automatically fetch the published video link from the connected YouTube channel
+  const checkYoutubeForPublishedPost = useCallback(
+    async (manualTrigger = false) => {
+      if (checkingRef.current) return
+      const current = draftRef.current
+      if (!current.title.trim() || current.title === 'Untitled post') {
+        if (manualTrigger) {
+          notify('Fetch your Scenering folder or set the video title first')
+        }
+        return
+      }
+
+      checkingRef.current = true
+      setYtChecking(true)
+      try {
+        const res = await autoFetchYoutubeVideoForPost(
+          current,
+          data.scenes,
+          data.platforms
+        )
+        if (res.matched) {
+          const alreadySame = current.videoUrl === res.matched.url
+          applyFetchedYoutubeVideo(res.matched.url, res.matched.title)
+          setYtStatusNote(`Fetched from ${res.source}: “${res.matched.title}”`)
+          if (!alreadySame || manualTrigger) {
+            notify(`YouTube link fetched automatically: ${res.matched.url} ✓`)
+          }
+        } else {
+          setYtStatusNote(
+            res.latestOnChannel
+              ? `Checked channel (${res.checkedCount} videos) — waiting for “${current.title}” to be published on YouTube.`
+              : `Checked channel (${res.channelId}) — waiting for your first YouTube post to go live.`
+          )
+          if (manualTrigger) {
+            notify('Not live on your YouTube channel yet — finish publishing in YouTube Studio first')
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Could not check YouTube right now'
+        setYtStatusNote(msg)
+        if (manualTrigger) notify(msg)
+      } finally {
+        checkingRef.current = false
+        setYtChecking(false)
+      }
+    },
+    [applyFetchedYoutubeVideo, data.platforms, data.scenes, notify]
+  )
+
+  const ytBoostTarget = useMemo(
+    () => resolveYoutubeBoostUrl(draft, data.platforms),
+    [draft, data.platforms]
+  )
+
+  // Automatically check YouTube when waiting for the first post to finish:
+  // - on initial open
+  // - whenever the user switches back from YouTube Studio (focus / visibilitychange)
+  // - every 25 seconds while waiting
+  useEffect(() => {
+    if (ytBoostTarget.isSpecificVideo) return
+    if (!draft.title.trim() || draft.title === 'Untitled post') return
+
+    const initialTimer = setTimeout(() => {
+      void checkYoutubeForPublishedPost(false)
+    }, 600)
+
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void checkYoutubeForPublishedPost(false)
+      }
+    }
+
+    window.addEventListener('focus', onFocusOrVisible)
+    document.addEventListener('visibilitychange', onFocusOrVisible)
+
+    const pollTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void checkYoutubeForPublishedPost(false)
+      }
+    }, 25000)
+
+    return () => {
+      clearTimeout(initialTimer)
+      clearInterval(pollTimer)
+      window.removeEventListener('focus', onFocusOrVisible)
+      document.removeEventListener('visibilitychange', onFocusOrVisible)
+    }
+  }, [ytBoostTarget.isSpecificVideo, draft.id, draft.title, checkYoutubeForPublishedPost])
 
   // Upload thumbnail when not present in the folder (or when replacing)
   const handleThumbnailUpload = async (file: File | undefined) => {
@@ -173,7 +312,8 @@ export default function SceneEditor({
 
     setDraft((d) => {
       const shouldUpdateTitle =
-        imported.title && (!d.title.trim() || d.title === 'Untitled post' || d.title === 'Untitled scene')
+        imported.title &&
+        (!d.title.trim() || d.title === 'Untitled post' || d.title === 'Untitled scene')
       const nextTitle = shouldUpdateTitle ? imported.title : d.title
       const nextSlug =
         shouldUpdateTitle && !slugTouched ? slugify(imported.title) : d.slug
@@ -265,47 +405,7 @@ export default function SceneEditor({
     set('tags', parsed)
   }
 
-  // Sync published YouTube video link -> plays the video IN YouTube across all social posts
-  const handleYoutubeVideoUrlChange = (rawUrl: string) => {
-    const url = rawUrl.trim()
-    setDraft((d) => {
-      const hasYtLink = d.links.some((l) => l.platform === 'youtube')
-      let nextLinks = d.links
-      if (url) {
-        if (hasYtLink) {
-          nextLinks = d.links.map((l, idx) =>
-            l.platform === 'youtube' && idx === d.links.findIndex((x) => x.platform === 'youtube')
-              ? { ...l, url, enabled: true, label: 'Watch Full Video on YouTube' }
-              : l
-          )
-        } else {
-          const bumped = d.links.map((l) => ({ ...l, order: l.order + 1 }))
-          nextLinks = [
-            {
-              id: uid(),
-              platform: 'youtube',
-              label: 'Watch Full Video on YouTube',
-              url,
-              enabled: true,
-              clicks: 0,
-              order: 0,
-            },
-            ...bumped,
-          ]
-        }
-      }
-      const autoLive = isSpecificYoutubeVideoUrl(url) && d.status === 'draft' ? 'live' : d.status
-      return {
-        ...d,
-        videoUrl: rawUrl,
-        status: autoLive,
-        links: nextLinks,
-        updatedAt: new Date().toISOString(),
-      }
-    })
-  }
-
-  // Toggle Website (`https://scenering.com`) on/off per video
+  // Toggle Website (`https://scenering.com`) on/off per post
   const websiteLink = draft.links.find((l) => l.platform === 'website')
   const websiteEnabled = Boolean(websiteLink?.enabled)
   const handleToggleWebsiteForPost = (enabled: boolean) => {
@@ -342,69 +442,7 @@ export default function SceneEditor({
     })
   }
 
-  const addLink = (platform: PlatformId) => {
-    const def = platformById(platform)
-    const defaultHandle =
-      data.platforms.find((p) => p.id === platform)?.defaultHandle?.trim() || ''
-    const defaultUrl = defaultHandle.startsWith('http') ? defaultHandle : ''
-    const existing = draft.links.filter((l) => l.platform === platform).length
-    const link: SceneLink = {
-      id: uid(),
-      platform,
-      label: existing === 0 ? `Watch on ${def.name}` : `${def.name} link ${existing + 1}`,
-      url: defaultUrl,
-      enabled: true,
-      clicks: 0,
-      order: draft.links.length,
-    }
-    setDraft((d) => ({ ...d, links: [...d.links, link] }))
-  }
-
-  const updateLink = (id: string, patch: Partial<SceneLink>) => {
-    setDraft((d) => ({
-      ...d,
-      links: d.links.map((l) => (l.id === id ? { ...l, ...patch } : l)),
-      updatedAt: new Date().toISOString(),
-    }))
-  }
-
-  const removeLink = (id: string) => {
-    setDraft((d) => ({ ...d, links: d.links.filter((l) => l.id !== id) }))
-  }
-
-  const moveLink = (id: string, dir: -1 | 1) => {
-    setDraft((d) => {
-      const links = [...d.links].sort((a, b) => a.order - b.order)
-      const idx = links.findIndex((l) => l.id === id)
-      const swap = idx + dir
-      if (idx < 0 || swap < 0 || swap >= links.length) return d
-      const tmp = links[idx].order
-      links[idx] = { ...links[idx], order: links[swap].order }
-      links[swap] = { ...links[swap], order: tmp }
-      return { ...d, links }
-    })
-  }
-
-  const tracked = useMemo(
-    () =>
-      draft.links.map((l) => ({
-        link: l,
-        url: buildTrackedUrl(l.url, {
-          source: platformById(l.platform).utmSource,
-          medium: data.settings.defaultMedium,
-          campaign: data.settings.defaultCampaign,
-          content: draft.slug,
-        }),
-      })),
-    [draft.links, draft.slug, data.settings]
-  )
-
   const ytPack = useMemo(() => buildYoutubeStudioPack(draft), [draft])
-
-  const ytBoostTarget = useMemo(
-    () => resolveYoutubeBoostUrl(draft, data.platforms),
-    [draft, data.platforms]
-  )
 
   const socialBoostText = useMemo(
     () => buildSocialBoostPost(draft, boostPlatform, { platforms: data.platforms }),
@@ -419,25 +457,13 @@ export default function SceneEditor({
     const normalizedTags =
       draft.tags && draft.tags.length > 0 ? draft.tags : ytPack.tags
     onSave({ ...draft, tags: normalizedTags })
-    notify('Saved ✓')
+    notify('Post saved ✓')
   }
-
-  const usedPlatforms = new Set(draft.links.map((l) => l.platform))
-  const connectedIds = useMemo(
-    () => new Set(data.platforms.filter((p) => p.connected).map((p) => p.id)),
-    [data.platforms]
-  )
-  const orderedPlatforms = useMemo(
-    () =>
-      [...PLATFORMS].sort(
-        (a, b) => Number(connectedIds.has(b.id)) - Number(connectedIds.has(a.id))
-      ),
-    [connectedIds]
-  )
 
   const hasRealThumbnail = draft.thumbnail.startsWith('data:image/')
   const needsThumbnailUpload = Boolean(draft.thumbnailMissing) || !hasRealThumbnail
   const composerLink = PLATFORM_COMPOSER_LINKS[boostPlatform]
+  const channelId = extractYoutubeChannelId(data.platforms)
 
   return (
     <div className="page">
@@ -448,7 +474,7 @@ export default function SceneEditor({
           </button>
           <h1>{draft.title || 'Untitled post'}</h1>
           <p className="page-sub">
-            Fetch from your Scenering folder → Post the 4 items to YouTube first → Fetch social posts here that play the video in YouTube.
+            1) Post the 4 items to YouTube first → 2) SceneBoost automatically fetches the YouTube link → 3) Copy your social posts.
           </p>
         </div>
         <div className="page-actions">
@@ -472,10 +498,10 @@ export default function SceneEditor({
           <div className="card yt-step-card">
             <div className="card-head">
               <div>
-                <div className="step-kicker yt-kicker">YOUTUBE FIRST — THE 4 ITEMS</div>
-                <h3>Fetch Scenering folder &amp; upload to YouTube</h3>
+                <div className="step-kicker yt-kicker">FIRST POST — YOUTUBE (THE 4 ITEMS)</div>
+                <h3>Fetch Scenering folder &amp; publish on YouTube</h3>
                 <p>
-                  Your YouTube Channel Settings already holds your predefined channel defaults — these 4 items are all YouTube needs for this video.
+                  Your YouTube Channel Settings already holds your predefined setup — upload these 4 items in YouTube Studio, and SceneBoost will fetch the live YouTube link automatically.
                 </p>
               </div>
               <a
@@ -836,27 +862,92 @@ export default function SceneEditor({
 
             <div className="divider" />
 
-            {/* PASTE PUBLISHED YOUTUBE LINK */}
+            {/* AUTOMATED YOUTUBE LINK SYNC — NO MANUAL INPUT / NO CHOICE */}
             <div className={`yt-live-url-box ${ytBoostTarget.isSpecificVideo ? 'ready' : 'pending'}`}>
               <div className="yt-copy-head" style={{ marginBottom: 6 }}>
-                <strong>Once YouTube is published — paste the YouTube video link here</strong>
+                <span>
+                  <Lock size={13} style={{ verticalAlign: -2, marginRight: 6 }} />
+                  <strong>Automated YouTube Video Link (fetched from channel {channelId})</strong>
+                </span>
                 <Badge tone={ytBoostTarget.isSpecificVideo ? 'live' : 'draft'}>
-                  {ytBoostTarget.isSpecificVideo ? '✓ Plays in YouTube' : 'Waiting for YouTube link'}
+                  {ytBoostTarget.isSpecificVideo
+                    ? '✓ Auto-fetched from YouTube'
+                    : ytChecking
+                    ? 'Checking YouTube…'
+                    : 'Auto-waiting for YouTube upload'}
                 </Badge>
               </div>
-              <p className="muted small" style={{ marginBottom: 8 }}>
-                Every social post fetched from SceneBoost below will use this YouTube link to play the video in YouTube.
-              </p>
-              <input
-                value={draft.videoUrl}
-                onChange={(e) => handleYoutubeVideoUrlChange(e.target.value)}
-                placeholder="https://youtu.be/… or https://www.youtube.com/watch?v=…"
-              />
+
+              {ytBoostTarget.isSpecificVideo ? (
+                <>
+                  <div className="hub-link-box" style={{ marginBottom: 8 }}>
+                    <code>{ytBoostTarget.url}</code>
+                  </div>
+                  <div className="step1-toggles-row">
+                    <span className="muted small">
+                      {draft.youtubeVideoTitle
+                        ? `Matched YouTube upload: “${draft.youtubeVideoTitle}”`
+                        : 'Locked to YouTube video'}
+                      {draft.youtubeFetchedAt ? ` · synced ${timeAgo(draft.youtubeFetchedAt)}` : ''}
+                    </span>
+                    <div className="btn-row">
+                      <a
+                        className="btn btn-ghost btn-sm"
+                        href={ytBoostTarget.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <ExternalLink size={13} /> Open on YouTube
+                      </a>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={ytChecking}
+                        onClick={() => void checkYoutubeForPublishedPost(true)}
+                      >
+                        <RefreshCw size={13} /> {ytChecking ? 'Checking…' : 'Re-sync from YouTube'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="muted small" style={{ marginBottom: 10 }}>
+                    No manual link needed — as soon as your first post is published in YouTube Studio, SceneBoost automatically fetches its YouTube video link from your channel (when you switch back to this tab or every 25s) and locks it into all social posts below.
+                  </p>
+                  {ytStatusNote && (
+                    <p className="small" style={{ marginBottom: 10, color: '#FFB03A' }}>
+                      {ytStatusNote}
+                    </p>
+                  )}
+                  <div className="btn-row">
+                    <button
+                      type="button"
+                      className="btn btn-accent btn-sm"
+                      disabled={ytChecking}
+                      onClick={() => void checkYoutubeForPublishedPost(true)}
+                    >
+                      <RefreshCw size={14} />{' '}
+                      {ytChecking
+                        ? 'Fetching from YouTube…'
+                        : 'First post done on YouTube — Fetch link now'}
+                    </button>
+                    <a
+                      className="btn btn-ghost btn-sm"
+                      href="https://studio.youtube.com"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <Youtube size={14} color="#FF0033" /> Open YouTube Studio
+                    </a>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
           {/* =========================================================
-              OTHER SOCIAL POSTS — FETCHED IN SCENEBOOST, PLAYS IN YOUTUBE
+              OTHER SOCIAL POSTS — AUTOMATICALLY LOCKED TO YOUTUBE LINK
              ========================================================= */}
           <div className="card boost-step-card">
             <div className="card-head">
@@ -864,90 +955,90 @@ export default function SceneEditor({
                 <div className="step-kicker boost-kicker">OTHER SOCIAL POSTS — PLAYS IN YOUTUBE</div>
                 <h3>Fetch platform-ready social posts from SceneBoost</h3>
                 <p>
-                  Formatted the way each platform needs it — uses only the top part of your description, and uses your YouTube link to play the video in YouTube.
+                  Formatted the way each platform needs it — uses only the top part of your description, with the YouTube link automatically locked in so every viewer plays the video in YouTube.
                 </p>
               </div>
               <Share2 size={18} className="muted-icon" />
             </div>
 
-            <div className={`boost-target-banner ${ytBoostTarget.isSpecificVideo ? 'ok' : 'warn'}`}>
-              {ytBoostTarget.isSpecificVideo ? (
-                <>
-                  <span>▶️ Video link in every post (plays in YouTube):</span>{' '}
+            {ytBoostTarget.isSpecificVideo ? (
+              <>
+                <div className="boost-target-banner ok">
+                  <span>🔒 Locked YouTube video link:</span>{' '}
                   <code>{ytBoostTarget.url}</code>
-                </>
-              ) : (
-                <>
-                  <span>⚠️ Paste your published YouTube video link above first</span>{' '}
-                  <span className="muted small">
-                    (currently falling back to channel: <code>{ytBoostTarget.url}</code>)
-                  </span>
-                </>
-              )}
-            </div>
+                </div>
 
-            <div className="filter-tabs" style={{ marginBottom: 12, flexWrap: 'wrap' }}>
-              {SOCIAL_BOOST_PLATFORMS.map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={`filter-tab ${boostPlatform === id ? 'active' : ''}`}
-                  onClick={() => setBoostPlatform(id)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+                <div className="filter-tabs" style={{ marginBottom: 12, flexWrap: 'wrap' }}>
+                  {SOCIAL_BOOST_PLATFORMS.map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`filter-tab ${boostPlatform === id ? 'active' : ''}`}
+                      onClick={() => setBoostPlatform(id)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
 
-            <pre className="code-block tall">{socialBoostText}</pre>
+                <pre className="code-block tall">{socialBoostText}</pre>
 
-            <div className="btn-row">
-              <button
-                type="button"
-                className="btn btn-accent btn-sm"
-                onClick={() =>
-                  void doCopy(
-                    `boost-${boostPlatform}`,
-                    socialBoostText,
-                    `${SOCIAL_BOOST_PLATFORMS.find(([id]) => id === boostPlatform)?.[1] ?? 'Social'} post`
-                  )
-                }
-              >
-                {copied === `boost-${boostPlatform}` ? <Check size={14} /> : <Copy size={14} />} Copy{' '}
-                {SOCIAL_BOOST_PLATFORMS.find(([id]) => id === boostPlatform)?.[1]} post
-              </button>
-              {hasRealThumbnail && (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={handleDownloadThumbnail}
-                >
-                  <Download size={14} /> Download thumbnail (.jpg)
-                </button>
-              )}
-              {composerLink && (
-                <a
-                  className="btn btn-ghost btn-sm"
-                  href={composerLink.url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <ExternalLink size={14} /> {composerLink.label}
-                </a>
-              )}
-            </div>
+                <div className="btn-row">
+                  <button
+                    type="button"
+                    className="btn btn-accent btn-sm"
+                    onClick={() =>
+                      void doCopy(
+                        `boost-${boostPlatform}`,
+                        socialBoostText,
+                        `${SOCIAL_BOOST_PLATFORMS.find(([id]) => id === boostPlatform)?.[1] ?? 'Social'} post`
+                      )
+                    }
+                  >
+                    {copied === `boost-${boostPlatform}` ? <Check size={14} /> : <Copy size={14} />} Copy{' '}
+                    {SOCIAL_BOOST_PLATFORMS.find(([id]) => id === boostPlatform)?.[1]} post
+                  </button>
+                  {hasRealThumbnail && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={handleDownloadThumbnail}
+                    >
+                      <Download size={14} /> Download thumbnail (.jpg)
+                    </button>
+                  )}
+                  {composerLink && (
+                    <a
+                      className="btn btn-ghost btn-sm"
+                      href={composerLink.url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLink size={14} /> {composerLink.label}
+                    </a>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="boost-target-banner warn" style={{ marginBottom: 0 }}>
+                <strong>⏳ Waiting for your first post on YouTube</strong>
+                <p className="muted small" style={{ marginTop: 4 }}>
+                  Publish this video on YouTube first using the 4 items above. As soon as YouTube publishes it on your channel, SceneBoost automatically fetches the YouTube video link and generates your Facebook, LinkedIn, TikTok, X, Threads, Twitch/Kick, Vimeo and WhatsApp posts here.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* =========================================================
-              PER-VIDEO WEBSITE TOGGLE & OPTIONAL SCENEBOOST LINKS
+              PER-POST WEBSITE SWITCH & APPEARANCE
              ========================================================= */}
           <div className="card">
             <div className="card-head">
               <div>
-                <h3>Channel &amp; Website links ({draft.links.length})</h3>
+                <h3>Website &amp; post options</h3>
                 <p>Switch off Website when a video isn’t posted to scenering.com</p>
               </div>
-              <Link2 size={18} className="muted-icon" />
+              <Globe size={18} className="muted-icon" />
             </div>
 
             <label className="inline-check" style={{ marginBottom: 14 }}>
@@ -957,163 +1048,40 @@ export default function SceneEditor({
                 onChange={(e) => handleToggleWebsiteForPost(e.target.checked)}
               />
               <span>
-                Include Website link (<code>scenering.com</code>) on this video’s SceneBoost hub
+                Include Website link (<code>scenering.com</code>) on this post
               </span>
             </label>
 
-            <div className="field-row" style={{ marginBottom: 14 }}>
-              <label className="field">
-                <span>Slug (SceneBoost URL)</span>
-                <div className="slug-input">
-                  <span>/s/</span>
-                  <input
-                    value={draft.slug}
-                    onChange={(e) => {
-                      setSlugTouched(true)
-                      setDraft((d) => ({ ...d, slug: slugify(e.target.value) }))
-                    }}
-                  />
-                </div>
-              </label>
-              <label className="field">
-                <span>Accent colour</span>
-                <div className="swatches">
-                  {ACCENTS.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      className={`swatch swatch-dot ${draft.accent === c ? 'active' : ''}`}
-                      style={{ background: c }}
-                      onClick={() => set('accent', c)}
-                      title={c}
-                      aria-label={`Accent ${c}`}
-                    >
-                      {draft.accent === c && <Check size={14} color="#070A12" />}
-                    </button>
-                  ))}
-                </div>
-              </label>
-            </div>
-
-            <div className="add-platform-bar">
-              <span className="muted">Quick add:</span>
-              <div className="chip-row">
-                {orderedPlatforms.map((p) => {
-                  const isConnected = connectedIds.has(p.id)
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className={`chip ${usedPlatforms.has(p.id) ? 'chip-used' : ''}`}
-                      style={!isConnected ? { opacity: 0.5 } : undefined}
-                      onClick={() => addLink(p.id)}
-                      title={isConnected ? `Add ${p.name}` : `${p.name} (not connected)`}
-                    >
-                      <Plus size={12} /> {p.name}
-                    </button>
-                  )
-                })}
+            <div className="field">
+              <span>Accent colour</span>
+              <div className="swatches">
+                {ACCENTS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`swatch swatch-dot ${draft.accent === c ? 'active' : ''}`}
+                    style={{ background: c }}
+                    onClick={() => set('accent', c)}
+                    title={c}
+                    aria-label={`Accent ${c}`}
+                  >
+                    {draft.accent === c && <Check size={14} color="#070A12" />}
+                  </button>
+                ))}
               </div>
             </div>
-
-            {draft.links.length > 0 && (
-              <div className="link-editor-list">
-                {[...draft.links]
-                  .sort((a, b) => a.order - b.order)
-                  .map((l, idx, arr) => {
-                    const def = platformById(l.platform)
-                    const tr = tracked.find((t) => t.link.id === l.id)?.url ?? l.url
-                    return (
-                      <div key={l.id} className={`link-editor-row ${!l.enabled ? 'disabled' : ''}`}>
-                        <div className="link-reorder">
-                          <button
-                            type="button"
-                            className="icon-btn"
-                            disabled={idx === 0}
-                            onClick={() => moveLink(l.id, -1)}
-                            title="Move up"
-                          >
-                            ▲
-                          </button>
-                          <GripVertical size={14} className="muted-icon" />
-                          <button
-                            type="button"
-                            className="icon-btn"
-                            disabled={idx === arr.length - 1}
-                            onClick={() => moveLink(l.id, 1)}
-                            title="Move down"
-                          >
-                            ▼
-                          </button>
-                        </div>
-
-                        <PlatformPill short={def.short} color={def.color} bg={def.bg} text={def.text} />
-
-                        <div className="link-fields">
-                          <div className="link-fields-top">
-                            <select
-                              value={l.platform}
-                              onChange={(e) => updateLink(l.id, { platform: e.target.value as PlatformId })}
-                            >
-                              {PLATFORMS.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.name}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              value={l.label}
-                              onChange={(e) => updateLink(l.id, { label: e.target.value })}
-                              placeholder="Button label"
-                            />
-                            <label className="switch" title={l.enabled ? 'Enabled' : 'Hidden'}>
-                              <input
-                                type="checkbox"
-                                checked={l.enabled}
-                                onChange={(e) => updateLink(l.id, { enabled: e.target.checked })}
-                              />
-                              <span />
-                            </label>
-                            <button
-                              type="button"
-                              className="icon-btn danger"
-                              onClick={() => removeLink(l.id)}
-                              title="Remove link"
-                            >
-                              <X size={15} />
-                            </button>
-                          </div>
-
-                          <input
-                            value={l.url}
-                            onChange={(e) => updateLink(l.id, { url: e.target.value })}
-                            placeholder={def.placeholder}
-                          />
-
-                          {l.url.trim() && (
-                            <div className="tracked-preview">
-                              <span>Tracked:</span>
-                              <code>{tr}</code>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-              </div>
-            )}
           </div>
         </div>
 
         {/* =========================================================
-            SIDEBAR — THE 4 YOUTUBE ITEMS CHECKLIST + PREVIEW
+            SIDEBAR — THE 4 YOUTUBE ITEMS + AUTO YOUTUBE STATUS
            ========================================================= */}
         <aside className="editor-side">
           <div className="card sticky-card">
             <div className="card-head">
               <div>
-                <h3>The 4 YouTube Items</h3>
-                <p>Ready check before social boost</p>
+                <h3>Post Progress</h3>
+                <p>4 YouTube items + auto link fetch</p>
               </div>
             </div>
 
@@ -1163,6 +1131,18 @@ export default function SceneEditor({
                   </p>
                 </div>
               </div>
+
+              <div className={`yt-check-item ${ytBoostTarget.isSpecificVideo ? 'done' : ''}`}>
+                <span className="yt-check-dot">{ytBoostTarget.isSpecificVideo ? '✓' : '▶'}</span>
+                <div>
+                  <strong>YouTube link auto-fetched</strong>
+                  <p className="muted small">
+                    {ytBoostTarget.isSpecificVideo
+                      ? 'Locked in — social posts ready!'
+                      : 'Auto-fetches once published on YouTube'}
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div className="divider" />
@@ -1170,9 +1150,9 @@ export default function SceneEditor({
             <div className="phone-preview">
               <div className="phone-hero" style={coverStyle(draft.thumbnail, 'hero')}>
                 <Badge tone={ytBoostTarget.isSpecificVideo ? 'live' : draft.status}>
-                  {ytBoostTarget.isSpecificVideo ? '▶ Plays in YouTube' : draft.status}
+                  {ytBoostTarget.isSpecificVideo ? '▶ Plays in YouTube' : 'Waiting for YouTube'}
                 </Badge>
-                <div className="phone-hero-title">{draft.title || 'Your video title'}</div>
+                <div className="phone-hero-title">{draft.title || 'Your post title'}</div>
               </div>
               <div className="phone-body">
                 <p>{ytPack.topDescription || 'Top part of your description appears here…'}</p>
@@ -1188,25 +1168,18 @@ export default function SceneEditor({
                 </a>
               </div>
               <div className="phone-foot" style={{ color: draft.accent }}>
-                Social posts fetched in SceneBoost → Play in YouTube
+                Automated YouTube link — no manual choice
               </div>
             </div>
 
             <div className="btn-row" style={{ marginTop: 12 }}>
               <button
                 type="button"
-                className="btn btn-accent btn-sm"
+                className="btn btn-accent btn-sm btn-block"
                 onClick={handleSave}
                 disabled={!dirty}
               >
                 <Save size={14} /> {dirty ? 'Save changes' : 'Saved'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => void doCopy('hub', hubUrl(draft.slug), 'SceneBoost link')}
-              >
-                {copied === 'hub' ? <Check size={14} /> : <Copy size={14} />} Hub URL
               </button>
             </div>
           </div>

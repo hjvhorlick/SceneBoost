@@ -113,8 +113,10 @@ export default function Settings({ data, onSave, onReset, notify }: Props) {
       <div className="card">
         <div className="card-head">
           <div>
-            <h3>Gemini AI — SEO Tag Generator</h3>
-            <p>Used to generate strictly SEO-friendly YouTube tags from your video title &amp; top description (stored only in this browser).</p>
+            <h3>Google API Key — Gemini SEO Tags &amp; Instant YouTube Sync</h3>
+            <p>
+              Generates strictly SEO-friendly YouTube tags with Gemini and enables instant YouTube Data API v3 link fetching (stored only in this browser). Without a key, YouTube links still auto-fetch from your public channel feed.
+            </p>
           </div>
           <KeyRound size={18} className="muted-icon" />
         </div>

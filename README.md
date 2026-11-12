@@ -9,8 +9,8 @@ SceneBoost is built around a **YouTube-first ranking & social boost workflow**:
    - **Credits & Top Part of Description**: Fetches `📢 CREDITS & ATTRIBUTIONS` and extracts **only the top part of the description**.
    - **Thumbnail**: Automatically loaded if a thumbnail image is in the same folder; if none is in the folder, SceneBoost flags it and provides an **Upload thumbnail** option (`1280×720` HD).
    - **SEO-Friendly Tags (with Gemini AI)**: Click **Ask Gemini for SEO tags** (using your Google Gemini API key stored locally in your browser) to generate strictly SEO-friendly search keywords and long-tail phrases (`<= 500` characters, zero filler/hashtags).
-2. **Upload ONLY the 4 items to YouTube first**: Since your YouTube Channel Settings already holds your predefined upload defaults, SceneBoost gives you just the 4 per-video items (Video/Title, Top Description + Credits, Thumbnail, and SEO Tags) — then paste your published YouTube video URL.
-3. **Fetch the other social posts in SceneBoost (video plays in YouTube)**: Generates native posts tailored for Facebook, LinkedIn, TikTok, X, Threads, Twitch/Kick, Vimeo and WhatsApp using **only the top part of the description** and your **YouTube video link** so every click plays the video directly **in YouTube**.
+2. **Upload ONLY the 4 items to YouTube first — Automated YouTube Link Fetch**: Since your YouTube Channel Settings already holds your predefined upload defaults, SceneBoost gives you just the 4 per-video items (Video/Title, Top Description + Credits, Thumbnail, and SEO Tags). As soon as your video is published on your YouTube channel (`UCV9v30xQPdbhwM5lAZC2MRQ`), SceneBoost **automatically fetches and locks in the YouTube video link** (no manual URL entry or choice).
+3. **Fetch the other social posts in SceneBoost (video plays in YouTube)**: Once the YouTube link is automatically fetched, SceneBoost unlocks native posts tailored for Facebook, LinkedIn, TikTok, X, Threads, Twitch/Kick, Vimeo and WhatsApp using **only the top part of the description** and the locked **YouTube video link** so every click plays the video directly **in YouTube**.
 
 ---
 

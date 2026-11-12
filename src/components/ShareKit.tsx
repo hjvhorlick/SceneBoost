@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import {
   Copy,
@@ -10,9 +10,11 @@ import {
   Share2,
   Edit3,
   Sparkles,
+  RefreshCw,
+  Lock,
 } from 'lucide-react'
-import type { AppData, Scene } from '../types'
-import { copyText, hubUrl } from '../lib/utils'
+import type { AppData, Scene, SceneLink } from '../types'
+import { copyText, timeAgo, uid } from '../lib/utils'
 import { coverStyle } from '../lib/platforms'
 import {
   SOCIAL_BOOST_PLATFORMS,
@@ -22,11 +24,11 @@ import {
   downloadYoutubeThumbnail,
   extractTopDescription,
   formatFileSize,
-  isSpecificYoutubeVideoUrl,
   resolveYoutubeBoostUrl,
   type SocialBoostPlatform,
 } from '../lib/scenering'
 import { generateSeoTagsWithGemini, loadGeminiApiKey } from '../lib/gemini'
+import { autoFetchYoutubeVideoForPost, extractYoutubeChannelId } from '../lib/youtube'
 import { Badge, EmptyState } from './ui'
 
 interface Props {
@@ -38,11 +40,12 @@ interface Props {
 
 export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: Props) {
   const [selectedId, setSelectedId] = useState<string>(data.scenes[0]?.id ?? '')
-  const [qrTargetMode, setQrTargetMode] = useState<'youtube' | 'hub'>('youtube')
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [copied, setCopied] = useState<string | null>(null)
   const [boostPlatform, setBoostPlatform] = useState<SocialBoostPlatform>('facebook')
   const [geminiBusy, setGeminiBusy] = useState(false)
+  const [ytChecking, setYtChecking] = useState(false)
+  const checkingRef = useRef(false)
 
   useEffect(() => {
     if (!selectedId && data.scenes[0]) setSelectedId(data.scenes[0].id)
@@ -60,22 +63,20 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
 
   const ytPack = useMemo(() => (scene ? buildYoutubeStudioPack(scene) : null), [scene])
 
-  const hub = scene ? hubUrl(scene.slug) : ''
-  const qrUrl = qrTargetMode === 'youtube' ? ytBoostTarget.url : hub
-
+  // QR code ALWAYS points straight to YouTube (automated — no choice)
   useEffect(() => {
-    if (!qrUrl) {
+    if (!ytBoostTarget.isSpecificVideo || !ytBoostTarget.url) {
       setQrDataUrl('')
       return
     }
-    QRCode.toDataURL(qrUrl, {
+    QRCode.toDataURL(ytBoostTarget.url, {
       width: 320,
       margin: 2,
       color: { dark: '#070A12', light: '#ffffff' },
     })
       .then(setQrDataUrl)
       .catch(() => setQrDataUrl(''))
-  }, [qrUrl])
+  }, [ytBoostTarget.isSpecificVideo, ytBoostTarget.url])
 
   const doCopy = async (key: string, text: string, msg = 'Copied ✓') => {
     const ok = await copyText(text)
@@ -84,40 +85,78 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
     setTimeout(() => setCopied(null), 1600)
   }
 
-  const handleQuickYoutubeUrl = (rawUrl: string) => {
-    if (!scene || !onUpdateScene) return
-    const url = rawUrl.trim()
-    const autoLive =
-      isSpecificYoutubeVideoUrl(url) && scene.status === 'draft' ? 'live' : scene.status
-    const hasYt = scene.links.some((l) => l.platform === 'youtube')
-    const nextLinks = url
-      ? hasYt
-        ? scene.links.map((l, idx) =>
-            l.platform === 'youtube' && idx === scene.links.findIndex((x) => x.platform === 'youtube')
-              ? { ...l, url, enabled: true, label: 'Watch Full Video on YouTube' }
-              : l
-          )
-        : [
-            {
-              id: `${scene.id}-yt`,
-              platform: 'youtube' as const,
-              label: 'Watch Full Video on YouTube',
-              url,
-              enabled: true,
-              clicks: 0,
-              order: 0,
-            },
-            ...scene.links.map((l) => ({ ...l, order: l.order + 1 })),
-          ]
-      : scene.links
-    onUpdateScene({
-      ...scene,
-      videoUrl: rawUrl,
-      status: autoLive,
-      links: nextLinks,
-      updatedAt: new Date().toISOString(),
-    })
-  }
+  const syncYoutubeAutomatically = useCallback(
+    async (manualTrigger = false) => {
+      if (!scene || !onUpdateScene || checkingRef.current) return
+      if (!scene.title.trim() || scene.title === 'Untitled post') return
+
+      checkingRef.current = true
+      setYtChecking(true)
+      try {
+        const res = await autoFetchYoutubeVideoForPost(scene, data.scenes, data.platforms)
+        if (res.matched) {
+          const nowIso = new Date().toISOString()
+          const hasYt = scene.links.some((l) => l.platform === 'youtube')
+          const nextLinks: SceneLink[] = hasYt
+            ? scene.links.map((l, idx) =>
+                l.platform === 'youtube' &&
+                idx === scene.links.findIndex((x) => x.platform === 'youtube')
+                  ? { ...l, url: res.matched!.url, enabled: true, label: 'Watch Full Video on YouTube' }
+                  : l
+              )
+            : [
+                {
+                  id: uid(),
+                  platform: 'youtube',
+                  label: 'Watch Full Video on YouTube',
+                  url: res.matched.url,
+                  enabled: true,
+                  clicks: 0,
+                  order: 0,
+                },
+                ...scene.links.map((l) => ({ ...l, order: l.order + 1 })),
+              ]
+          onUpdateScene({
+            ...scene,
+            videoUrl: res.matched.url,
+            youtubeVideoTitle: res.matched.title,
+            youtubeFetchedAt: nowIso,
+            status: 'live',
+            links: nextLinks,
+            updatedAt: nowIso,
+          })
+          if (manualTrigger || scene.videoUrl !== res.matched.url) {
+            notify(`Fetched YouTube link automatically: ${res.matched.url} ✓`)
+          }
+        } else if (manualTrigger) {
+          notify('Not live on your YouTube channel yet — publish on YouTube first')
+        }
+      } catch (err) {
+        if (manualTrigger) {
+          notify(err instanceof Error ? err.message : 'Could not check YouTube right now')
+        }
+      } finally {
+        checkingRef.current = false
+        setYtChecking(false)
+      }
+    },
+    [scene, onUpdateScene, data.scenes, data.platforms, notify]
+  )
+
+  useEffect(() => {
+    if (!scene || ytBoostTarget.isSpecificVideo) return
+    const t = setTimeout(() => void syncYoutubeAutomatically(false), 600)
+    const onFocus = () => {
+      if (document.visibilityState === 'visible') void syncYoutubeAutomatically(false)
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
+    return () => {
+      clearTimeout(t)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
+    }
+  }, [scene, ytBoostTarget.isSpecificVideo, syncYoutubeAutomatically])
 
   const handleAskGemini = async () => {
     if (!scene || !onUpdateScene) return
@@ -154,7 +193,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
           <div>
             <h1>Share Kit</h1>
             <p className="page-sub">
-              The 4 YouTube items + platform-tailored social posts that play the video in YouTube.
+              The 4 YouTube items + automated YouTube link fetch + platform-tailored social posts.
             </p>
           </div>
         </div>
@@ -172,6 +211,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
   })
   const composerLink = PLATFORM_COMPOSER_LINKS[boostPlatform]
   const hasRealThumbnail = scene.thumbnail.startsWith('data:image/')
+  const channelId = extractYoutubeChannelId(data.platforms)
 
   return (
     <div className="page">
@@ -179,7 +219,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
         <div>
           <h1>Share Kit</h1>
           <p className="page-sub">
-            Upload the 4 items to YouTube first, then fetch each social post below — every post plays the video in YouTube.
+            Publish the 4 items on YouTube first — SceneBoost automatically fetches your YouTube link and locks it into every social post.
           </p>
         </div>
         <div className="btn-row">
@@ -200,7 +240,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
               className="btn btn-ghost"
               onClick={() => onEditScene(scene.id)}
             >
-              <Edit3 size={14} /> Edit / Upload thumbnail
+              <Edit3 size={14} /> Edit post
             </button>
           )}
         </div>
@@ -211,7 +251,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
         <div className="card yt-step-card">
           <div className="card-head">
             <div>
-              <div className="step-kicker yt-kicker">YOUTUBE FIRST — THE 4 ITEMS</div>
+              <div className="step-kicker yt-kicker">FIRST POST — YOUTUBE (THE 4 ITEMS)</div>
               <h3>YouTube Upload Items</h3>
               <p>Ready for YouTube Studio alongside your channel’s predefined upload defaults.</p>
             </div>
@@ -296,26 +336,55 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
           <div className="divider" />
           <div className={`yt-live-url-box ${ytBoostTarget.isSpecificVideo ? 'ready' : 'pending'}`}>
             <div className="yt-copy-head" style={{ marginBottom: 6 }}>
-              <strong>Published YouTube Video Link (plays in YouTube)</strong>
+              <span>
+                <Lock size={13} style={{ verticalAlign: -2, marginRight: 6 }} />
+                <strong>Automated YouTube Video Link ({channelId})</strong>
+              </span>
               <Badge tone={ytBoostTarget.isSpecificVideo ? 'live' : 'draft'}>
-                {ytBoostTarget.isSpecificVideo ? '✓ Linked' : 'Paste YouTube link'}
+                {ytBoostTarget.isSpecificVideo
+                  ? '✓ Auto-fetched'
+                  : ytChecking
+                  ? 'Checking…'
+                  : 'Waiting for YouTube'}
               </Badge>
             </div>
-            {onUpdateScene ? (
-              <input
-                value={scene.videoUrl}
-                onChange={(e) => handleQuickYoutubeUrl(e.target.value)}
-                placeholder="https://youtu.be/… or https://www.youtube.com/watch?v=…"
-              />
+
+            {ytBoostTarget.isSpecificVideo ? (
+              <>
+                <div className="hub-link-box" style={{ marginBottom: 8 }}>
+                  <code>{ytBoostTarget.url}</code>
+                </div>
+                <div className="step1-toggles-row">
+                  <span className="muted small">
+                    {scene.youtubeFetchedAt ? `Synced ${timeAgo(scene.youtubeFetchedAt)}` : 'Locked to YouTube'}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={ytChecking}
+                    onClick={() => void syncYoutubeAutomatically(true)}
+                  >
+                    <RefreshCw size={13} /> Re-sync from YouTube
+                  </button>
+                </div>
+              </>
             ) : (
-              <div className="hub-link-box">
-                <code>{ytBoostTarget.url}</code>
+              <div className="btn-row">
+                <button
+                  type="button"
+                  className="btn btn-accent btn-sm"
+                  disabled={ytChecking}
+                  onClick={() => void syncYoutubeAutomatically(true)}
+                >
+                  <RefreshCw size={13} />{' '}
+                  {ytChecking ? 'Fetching from YouTube…' : 'First post done — Fetch from YouTube'}
+                </button>
               </div>
             )}
           </div>
         </div>
 
-        {/* RIGHT COLUMN: ITEM 3 THUMBNAIL + QR */}
+        {/* RIGHT COLUMN: ITEM 3 THUMBNAIL + AUTOMATED YOUTUBE QR */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card">
             <div className="card-head">
@@ -367,108 +436,102 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
           <div className="card">
             <div className="card-head">
               <div>
-                <h3>QR Code</h3>
-                <p>Scans straight to YouTube</p>
+                <h3>YouTube QR Code</h3>
+                <p>Scans straight to the YouTube video</p>
               </div>
               <QrCode size={18} className="muted-icon" />
             </div>
-            <div className="filter-tabs" style={{ marginBottom: 10 }}>
-              <button
-                type="button"
-                className={`filter-tab ${qrTargetMode === 'youtube' ? 'active' : ''}`}
-                onClick={() => setQrTargetMode('youtube')}
-              >
-                Play in YouTube
-              </button>
-              <button
-                type="button"
-                className={`filter-tab ${qrTargetMode === 'hub' ? 'active' : ''}`}
-                onClick={() => setQrTargetMode('hub')}
-              >
-                SceneBoost Hub
-              </button>
-            </div>
             <div className="qr-box">
               {qrDataUrl ? (
-                <img src={qrDataUrl} alt={`QR code for ${scene.title}`} />
+                <img src={qrDataUrl} alt={`YouTube QR code for ${scene.title}`} />
               ) : (
-                <div className="qr-placeholder">Generating QR…</div>
+                <div className="qr-placeholder">
+                  QR activates automatically once the YouTube video link is fetched.
+                </div>
               )}
             </div>
             {qrDataUrl && (
               <a
                 className="btn btn-ghost btn-sm btn-block"
                 href={qrDataUrl}
-                download={`${scene.slug}-${qrTargetMode}-qr.png`}
+                download={`${scene.slug}-youtube-qr.png`}
               >
-                <Download size={14} /> Download QR (PNG)
+                <Download size={14} /> Download YouTube QR (PNG)
               </a>
             )}
           </div>
         </div>
       </div>
 
-      {/* OTHER SOCIAL POSTS FETCHED IN SCENEBOOST -> PLAYS IN YOUTUBE */}
+      {/* OTHER SOCIAL POSTS — AUTOMATICALLY LOCKED TO YOUTUBE LINK */}
       <div className="card boost-step-card">
         <div className="card-head">
           <div>
-            <div className="step-kicker boost-kicker">FETCH SOCIAL POSTS — PLAYS IN YOUTUBE</div>
+            <div className="step-kicker boost-kicker">OTHER SOCIAL POSTS — PLAYS IN YOUTUBE</div>
             <h3>Other Social Posts (tailored per platform)</h3>
             <p>
-              Uses only the top part of the description and links straight to <code>{ytBoostTarget.url}</code> so every viewer plays the video in YouTube.
+              Uses only the top part of the description and automatically uses your fetched YouTube video link.
             </p>
           </div>
           <Share2 size={18} className="muted-icon" />
         </div>
 
-        <div className="filter-tabs" style={{ marginBottom: 12, flexWrap: 'wrap' }}>
-          {SOCIAL_BOOST_PLATFORMS.map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`filter-tab ${boostPlatform === id ? 'active' : ''}`}
-              onClick={() => setBoostPlatform(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {ytBoostTarget.isSpecificVideo ? (
+          <>
+            <div className="boost-target-banner ok">
+              <span>🔒 Locked YouTube video link:</span> <code>{ytBoostTarget.url}</code>
+            </div>
 
-        <pre className="code-block tall">{socialPost}</pre>
+            <div className="filter-tabs" style={{ marginBottom: 12, flexWrap: 'wrap' }}>
+              {SOCIAL_BOOST_PLATFORMS.map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`filter-tab ${boostPlatform === id ? 'active' : ''}`}
+                  onClick={() => setBoostPlatform(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
 
-        <div className="btn-row">
-          <button
-            type="button"
-            className="btn btn-accent btn-sm"
-            onClick={() =>
-              void doCopy(
-                `boost-${boostPlatform}`,
-                socialPost,
-                `${SOCIAL_BOOST_PLATFORMS.find(([id]) => id === boostPlatform)?.[1] ?? 'Social'} post copied ✓`
-              )
-            }
-          >
-            {copied === `boost-${boostPlatform}` ? <Check size={14} /> : <Copy size={14} />} Copy{' '}
-            {SOCIAL_BOOST_PLATFORMS.find(([id]) => id === boostPlatform)?.[1]} post
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => void doCopy('yt-direct-url', ytBoostTarget.url, 'YouTube link copied ✓')}
-          >
-            {copied === 'yt-direct-url' ? <Check size={14} /> : <Copy size={14} />} Copy YouTube link
-          </button>
-          {composerLink && (
-            <a
-              className="btn btn-ghost btn-sm"
-              href={composerLink.url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <ExternalLink size={14} /> {composerLink.label}
-            </a>
-          )}
-        </div>
+            <pre className="code-block tall">{socialPost}</pre>
+
+            <div className="btn-row">
+              <button
+                type="button"
+                className="btn btn-accent btn-sm"
+                onClick={() =>
+                  void doCopy(
+                    `boost-${boostPlatform}`,
+                    socialPost,
+                    `${SOCIAL_BOOST_PLATFORMS.find(([id]) => id === boostPlatform)?.[1] ?? 'Social'} post copied ✓`
+                  )
+                }
+              >
+                {copied === `boost-${boostPlatform}` ? <Check size={14} /> : <Copy size={14} />} Copy{' '}
+                {SOCIAL_BOOST_PLATFORMS.find(([id]) => id === boostPlatform)?.[1]} post
+              </button>
+              {composerLink && (
+                <a
+                  className="btn btn-ghost btn-sm"
+                  href={composerLink.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink size={14} /> {composerLink.label}
+                </a>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="boost-target-banner warn" style={{ marginBottom: 0 }}>
+            <strong>⏳ Waiting for your first post on YouTube</strong>
+            <p className="muted small" style={{ marginTop: 4 }}>
+              Publish your video on YouTube first — SceneBoost will automatically fetch the YouTube video link from your channel and unlock all social posts here.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
