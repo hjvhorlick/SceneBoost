@@ -14,9 +14,10 @@ import {
   FolderOpen,
   FileText,
   MessageSquare,
+  ImagePlus,
 } from 'lucide-react'
 import type { AppData, PlatformId, Scene, SceneLink } from '../types'
-import { PLATFORMS, GRADIENTS, ACCENTS, platformById } from '../lib/platforms'
+import { PLATFORMS, COVER_THEMES, ACCENTS, coverStyle, platformById } from '../lib/platforms'
 import {
   POST_TEMPLATE_PLATFORMS,
   buildPostWording,
@@ -44,6 +45,30 @@ export default function SceneEditor({ scene, data, onBack, onSave, onDelete, onO
   const [includeCredits, setIncludeCredits] = useState(false)
   const folderInputRef = useRef<HTMLInputElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const coverInputRef = useRef<HTMLInputElement | null>(null)
+
+  const handleCustomCoverUpload = (file: File | undefined) => {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const img = new Image()
+      img.onload = () => {
+        const maxW = 960
+        const scale = Math.min(1, maxW / Math.max(1, img.width))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.round(img.width * scale)
+        canvas.height = Math.round(img.height * scale)
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82)
+        set('thumbnail', dataUrl)
+        notify('Custom hub cover image applied ✓')
+      }
+      img.src = String(reader.result)
+    }
+    reader.readAsDataURL(file)
+  }
 
   const handleImportScenering = async (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -305,40 +330,68 @@ export default function SceneEditor({ scene, data, onBack, onSave, onDelete, onO
               <input value={draft.videoUrl} onChange={(e) => set('videoUrl', e.target.value)} placeholder="https://youtube.com/watch?v=…" />
             </label>
 
-            <div className="field-row">
-              <div className="field">
-                <span>Thumbnail style</span>
-                <div className="swatches">
-                  {Object.entries(GRADIENTS).map(([key, css]) => (
-                    <button
-                      key={key}
-                      className={`swatch ${draft.thumbnail === key ? 'active' : ''}`}
-                      style={{ background: css }}
-                      onClick={() => set('thumbnail', key)}
-                      title={key}
-                      aria-label={`Thumbnail ${key}`}
-                    >
-                      {draft.thumbnail === key && <Check size={14} />}
-                    </button>
-                  ))}
+            <div className="field">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span>Hub cover artwork (Scenering themes)</span>
+                <div>
+                  <input
+                    ref={coverInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      handleCustomCoverUpload(e.target.files?.[0])
+                      e.target.value = ''
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => coverInputRef.current?.click()}
+                  >
+                    <ImagePlus size={13} /> Custom image
+                  </button>
                 </div>
               </div>
-              <div className="field">
-                <span>Accent colour</span>
-                <div className="swatches">
-                  {ACCENTS.map((c) => (
+              <div className="cover-themes-grid">
+                {COVER_THEMES.map((theme) => {
+                  const active = draft.thumbnail === theme.id
+                  return (
                     <button
-                      key={c}
-                      className={`swatch swatch-dot ${draft.accent === c ? 'active' : ''}`}
-                      style={{ background: c }}
-                      onClick={() => set('accent', c)}
-                      title={c}
-                      aria-label={`Accent ${c}`}
+                      key={theme.id}
+                      type="button"
+                      className={`cover-theme-card ${active ? 'active' : ''}`}
+                      style={coverStyle(theme.id, 'swatch')}
+                      onClick={() => set('thumbnail', theme.id)}
+                      title={theme.label}
+                      aria-label={`Cover ${theme.label}`}
                     >
-                      {draft.accent === c && <Check size={14} color="#070A12" />}
+                      <span className="cover-theme-check">
+                        {active && <Check size={13} />}
+                      </span>
+                      <span className="cover-theme-label">{theme.label}</span>
                     </button>
-                  ))}
-                </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="field">
+              <span>Accent colour</span>
+              <div className="swatches">
+                {ACCENTS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`swatch swatch-dot ${draft.accent === c ? 'active' : ''}`}
+                    style={{ background: c }}
+                    onClick={() => set('accent', c)}
+                    title={c}
+                    aria-label={`Accent ${c}`}
+                  >
+                    {draft.accent === c && <Check size={14} color="#070A12" />}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
@@ -518,7 +571,7 @@ export default function SceneEditor({ scene, data, onBack, onSave, onDelete, onO
             <div className="divider" />
             <h4 className="section-label">Live preview</h4>
             <div className="phone-preview">
-              <div className="phone-hero" style={{ background: GRADIENTS[draft.thumbnail] ?? GRADIENTS.mono }}>
+              <div className="phone-hero" style={coverStyle(draft.thumbnail, 'hero')}>
                 <Badge tone={draft.status}>{draft.status}</Badge>
                 <div className="phone-hero-title">{draft.title || 'Your scene title'}</div>
               </div>

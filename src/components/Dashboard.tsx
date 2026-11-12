@@ -1,7 +1,7 @@
 import { MousePointerClick, Clapperboard, Link2, Plug2, ArrowRight, TrendingUp, Plus } from 'lucide-react'
 import type { AppData } from '../types'
 import { formatNumber, sceneClicks, timeAgo } from '../lib/utils'
-import { platformById, GRADIENTS } from '../lib/platforms'
+import { coverStyle, platformById } from '../lib/platforms'
 import { StatCard, Badge, PlatformPill } from './ui'
 
 interface Props {
@@ -78,7 +78,7 @@ export default function Dashboard({ data, onNavigate, onCreate }: Props) {
                 return (
                   <button key={sc.id} className="rank-row" onClick={() => onNavigate('editor', sc.id)}>
                     <span className="rank-num">{i + 1}</span>
-                    <span className="rank-thumb" style={{ background: GRADIENTS[sc.thumbnail] ?? GRADIENTS.mono }}>
+                    <span className="rank-thumb" style={coverStyle(sc.thumbnail, 'card')}>
                       <Clapperboard size={16} />
                     </span>
                     <span className="rank-main">

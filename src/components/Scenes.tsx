@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Plus, Search, Clapperboard, Trash2, ExternalLink, Pause, Play, Pencil } from 'lucide-react'
 import type { AppData, Scene } from '../types'
 import { formatNumber, sceneClicks, timeAgo } from '../lib/utils'
-import { GRADIENTS, platformById } from '../lib/platforms'
+import { coverStyle, platformById } from '../lib/platforms'
 import { Badge, EmptyState, PlatformPill } from './ui'
 
 interface Props {
@@ -107,7 +107,7 @@ function SceneCard({
   const enabledLinks = scene.links.filter((l) => l.enabled)
   return (
     <article className="scene-card">
-      <div className="scene-thumb" style={{ background: GRADIENTS[scene.thumbnail] ?? GRADIENTS.mono }}>
+      <div className="scene-thumb" style={coverStyle(scene.thumbnail, 'card')}>
         <div className="scene-thumb-overlay">
           <span className="scene-play">
             <Clapperboard size={20} />

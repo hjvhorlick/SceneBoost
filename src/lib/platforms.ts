@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import type { PlatformId } from '../types'
 
 export interface PlatformDef {
@@ -151,13 +152,82 @@ export const PLATFORMS: PlatformDef[] = [
 export const platformById = (id: PlatformId): PlatformDef =>
   PLATFORMS.find((p) => p.id === id) ?? PLATFORMS[PLATFORMS.length - 1]
 
-export const GRADIENTS: Record<string, string> = {
-  neon: 'linear-gradient(135deg,#7C5CFF 0%,#FF3D81 55%,#FFB03A 100%)',
-  ocean: 'linear-gradient(135deg,#00C9FF 0%,#0077FF 60%,#7C5CFF 100%)',
-  lime: 'linear-gradient(135deg,#D4FF3F 0%,#00E676 60%,#00B0FF 100%)',
-  sunset: 'linear-gradient(135deg,#FF512F 0%,#DD2476 60%,#7C5CFF 100%)',
-  mono: 'linear-gradient(135deg,#232A3D 0%,#0F1626 60%,#1A2238 100%)',
-  gold: 'linear-gradient(135deg,#F7971E 0%,#FFD200 55%,#FF512F 100%)',
+export interface CoverTheme {
+  id: string
+  label: string
+  image: string
+  fallbackGradient: string
+}
+
+export const COVER_THEMES: CoverTheme[] = [
+  {
+    id: 'neon',
+    label: 'Scenering Signature',
+    image: '/covers/scenering-neon.jpg',
+    fallbackGradient: 'linear-gradient(135deg,#0A1538 0%,#1E4ED8 55%,#F59E0B 100%)',
+  },
+  {
+    id: 'ocean',
+    label: 'Cobalt Cinema Ring',
+    image: '/covers/scenering-ocean.jpg',
+    fallbackGradient: 'linear-gradient(135deg,#040B24 0%,#0077FF 60%,#00C9FF 100%)',
+  },
+  {
+    id: 'gold',
+    label: 'Golden Premiere',
+    image: '/covers/scenering-gold.jpg',
+    fallbackGradient: 'linear-gradient(135deg,#120D04 0%,#B45309 55%,#FBBF24 100%)',
+  },
+  {
+    id: 'sunset',
+    label: 'Projector Stage',
+    image: '/covers/scenering-sunset.jpg',
+    fallbackGradient: 'linear-gradient(135deg,#1A0826 0%,#BE185D 55%,#F59E0B 100%)',
+  },
+  {
+    id: 'lime',
+    label: 'Broadcast Studio',
+    image: '/covers/scenering-lime.jpg',
+    fallbackGradient: 'linear-gradient(135deg,#071422 0%,#10B981 55%,#00C9FF 100%)',
+  },
+  {
+    id: 'mono',
+    label: 'Platinum Lens',
+    image: '/covers/scenering-mono.jpg',
+    fallbackGradient: 'linear-gradient(135deg,#0B0E14 0%,#1F2937 55%,#4B5563 100%)',
+  },
+]
+
+export const GRADIENTS: Record<string, string> = Object.fromEntries(
+  COVER_THEMES.map((t) => [t.id, t.fallbackGradient])
+)
+
+export function resolveCoverImageUrl(thumbnail: string): string {
+  const trimmed = (thumbnail || '').trim()
+  const preset = COVER_THEMES.find((t) => t.id === trimmed)
+  if (preset) return preset.image
+  if (/^(https?:\/\/|\/|data:image\/)/i.test(trimmed)) return trimmed
+  return COVER_THEMES[0].image
+}
+
+export function coverStyle(
+  thumbnail: string,
+  variant: 'hero' | 'card' | 'swatch' = 'card'
+): CSSProperties {
+  const imgUrl = resolveCoverImageUrl(thumbnail)
+  const preset = COVER_THEMES.find((t) => t.id === thumbnail) ?? COVER_THEMES[0]
+  const scrim =
+    variant === 'hero'
+      ? 'linear-gradient(180deg, rgba(7,10,18,0.14) 0%, rgba(7,10,18,0.48) 56%, rgba(7,10,18,0.88) 100%)'
+      : variant === 'swatch'
+        ? 'linear-gradient(180deg, rgba(7,10,18,0.04) 0%, rgba(7,10,18,0.52) 100%)'
+        : 'linear-gradient(180deg, rgba(7,10,18,0.18) 0%, rgba(7,10,18,0.78) 100%)'
+  return {
+    backgroundImage: `${scrim}, url("${imgUrl}"), ${preset.fallbackGradient}`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+  }
 }
 
 export const ACCENTS = ['#D4FF3F', '#7C5CFF', '#FF3D81', '#00C9FF', '#FFB03A', '#00E676']
