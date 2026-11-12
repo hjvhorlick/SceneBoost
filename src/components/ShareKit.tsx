@@ -28,7 +28,7 @@ import {
   type SocialBoostPlatform,
 } from '../lib/scenering'
 import { generateSeoTagsWithGemini, loadGeminiApiKey } from '../lib/gemini'
-import { autoFetchYoutubeVideoForPost } from '../lib/youtube'
+import { autoFetchYoutubeVideoForPost, extractYoutubeChannelId } from '../lib/youtube'
 import { Badge, EmptyState } from './ui'
 
 interface Props {
@@ -241,11 +241,11 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
             </div>
             <a
               className="btn btn-ghost btn-sm"
-              href="https://studio.youtube.com"
+              href={`https://studio.youtube.com/channel/${extractYoutubeChannelId(data.platforms)}/videos/upload?d=ud`}
               target="_blank"
               rel="noreferrer"
             >
-              <Youtube size={15} color="#FF0033" /> YouTube Studio <ExternalLink size={12} />
+              <Youtube size={15} color="#FF0033" /> YouTube Upload Popup <ExternalLink size={12} />
             </a>
           </div>
 

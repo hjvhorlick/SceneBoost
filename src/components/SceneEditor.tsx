@@ -18,9 +18,9 @@ import {
   RefreshCw,
   Lock,
   Globe,
-  CloudUpload,
   Film,
   AlertCircle,
+  ClipboardPaste,
 } from 'lucide-react'
 import type { AppData, Scene, SceneLink } from '../types'
 import { COVER_THEMES, ACCENTS, coverStyle } from '../lib/platforms'
@@ -48,13 +48,9 @@ import {
 } from '../lib/gemini'
 import {
   autoFetchYoutubeVideoForPost,
-  connectYoutubeAccount,
-  getConnectedYoutubeChannelLabel,
-  loadGoogleOAuthClientId,
-  saveGoogleOAuthClientId,
+  extractYoutubeChannelId,
   snapshotExistingChannelVideoIds,
   snapshotExistingChannelVideos,
-  uploadPostDirectlyToYoutube,
   verifyStudioVideoUrlForPost,
 } from '../lib/youtube'
 import { loadVideoFileForPost, saveVideoFileForPost } from '../lib/videoStore'
@@ -108,20 +104,9 @@ export default function SceneEditor({
   const [showGeminiKeyBox, setShowGeminiKeyBox] = useState(false)
   const [geminiBusy, setGeminiBusy] = useState(false)
 
-  // Real YouTube upload & strict post-upload verification state
+  // Zero-login YouTube verification state (no Google OAuth required)
   const [ytChecking, setYtChecking] = useState(false)
   const [ytStatusNote, setYtStatusNote] = useState<string>('')
-  const [ytUploading, setYtUploading] = useState(false)
-  const [ytUploadStage, setYtUploadStage] = useState<string>('')
-  const [ytUploadPct, setYtUploadPct] = useState<number>(0)
-  const [ytPrivacy, setYtPrivacy] = useState<'public' | 'unlisted' | 'private'>('public')
-  const [showOauthBox, setShowOauthBox] = useState(false)
-  const [oauthClientId, setOauthClientId] = useState<string>(() => loadGoogleOAuthClientId())
-  const [connectedChannelLabel, setConnectedChannelLabel] = useState<string>(() =>
-    getConnectedYoutubeChannelLabel()
-  )
-  const [connectingYt, setConnectingYt] = useState(false)
-  const [showUnlistedVerify, setShowUnlistedVerify] = useState(false)
   const [studioVideoUrlInput, setStudioVideoUrlInput] = useState('')
   const checkingRef = useRef(false)
   const draftRef = useRef(draft)
@@ -137,7 +122,7 @@ export default function SceneEditor({
     setVideoFile(initialVideoFile ?? null)
     setSlugTouched(false)
     setYtStatusNote('')
-    setYtUploadPct(0)
+    setStudioVideoUrlInput('')
     const initialTags =
       scene.tags && scene.tags.length > 0
         ? scene.tags
@@ -523,96 +508,23 @@ export default function SceneEditor({
   const hasRealThumbnail = draft.thumbnail.startsWith('data:image/')
   const needsThumbnailUpload = Boolean(draft.thumbnailMissing) || !hasRealThumbnail
   const composerLink = PLATFORM_COMPOSER_LINKS[boostPlatform]
+  const channelId = extractYoutubeChannelId(data.platforms)
+  const youtubeStudioUploadUrl = `https://studio.youtube.com/channel/${channelId}/videos/upload?d=ud`
 
-  const handleConnectYoutubeChannel = async () => {
-    const cleanClientId = oauthClientId.trim() || loadGoogleOAuthClientId()
-    if (!cleanClientId) {
-      setShowOauthBox(true)
-      notify('Paste your Google Cloud Web OAuth Client ID first')
-      return
-    }
-    saveGoogleOAuthClientId(cleanClientId)
-    setConnectingYt(true)
-    try {
-      const ch = await connectYoutubeAccount(cleanClientId)
-      const label = `${ch.channelTitle} (${ch.channelId})`
-      setConnectedChannelLabel(label)
-      setShowOauthBox(false)
-      notify(`Connected to YouTube channel: ${ch.channelTitle} ✓`)
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not connect YouTube account')
-    } finally {
-      setConnectingYt(false)
-    }
-  }
-
-  const handleDirectUploadToYoutube = async () => {
-    if (!videoFile) {
-      notify('Attach your video file (.mp4/.webm) or select your Scenering folder first')
-      videoInputRef.current?.click()
-      return
-    }
-    const cleanClientId = oauthClientId.trim() || loadGoogleOAuthClientId()
-    if (!cleanClientId) {
-      setShowOauthBox(true)
-      notify('Connect your YouTube Google OAuth Client ID below to upload directly from SceneBoost')
-      return
-    }
-    saveGoogleOAuthClientId(cleanClientId)
-    setYtUploading(true)
-    setYtUploadPct(2)
-    setYtUploadStage('Signing in & starting YouTube upload…')
-    setYtStatusNote('')
-    try {
-      const otherTitles = data.scenes
-        .filter((s) => s.id !== draft.id)
-        .map((s) => s.title)
-      const created = await uploadPostDirectlyToYoutube({
-        clientId: cleanClientId,
-        videoFile,
-        title: ytPack.title,
-        existingTitles: otherTitles,
-        descriptionWithCredits: ytPack.descriptionWithCredits,
-        tags: ytPack.tags,
-        thumbnailDataUrl: hasRealThumbnail ? draft.thumbnail : undefined,
-        privacyStatus: ytPrivacy,
-        onStage: (stage, pct) => {
-          setYtUploadStage(stage)
-          setYtUploadPct(pct)
-        },
-      })
-      applyFetchedYoutubeVideo(created.url, created.title)
-      setShowOauthBox(false)
-      const renamedNote =
-        created.title !== ytPack.title ? ` as “${created.title}”` : ''
-      setYtStatusNote(
-        `Uploaded & verified on YouTube${renamedNote} (${created.url}) — placed into all social posts!`
-      )
-      notify(`Video uploaded${renamedNote} & verified on YouTube (${created.url}) ✓`)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Direct YouTube upload failed'
-      setYtStatusNote(`Upload did NOT complete: ${msg}`)
-      notify(msg)
-    } finally {
-      setYtUploading(false)
-      setYtUploadStage('')
-    }
-  }
-
-  const handleVerifyStudioVideoUrl = async () => {
-    if (!studioVideoUrlInput.trim()) {
-      notify('Paste the newly created https://youtu.be/... video URL from YouTube Studio')
+  const handleVerifyStudioVideoUrl = async (overrideUrl?: string) => {
+    const candidate = (overrideUrl ?? studioVideoUrlInput).trim()
+    if (!candidate) {
+      notify('Paste or copy the newly created https://youtu.be/... video URL from YouTube Studio first')
       return
     }
     setYtChecking(true)
     try {
       const verified = await verifyStudioVideoUrlForPost(
-        studioVideoUrlInput,
+        candidate,
         draftRef.current,
         data.scenes
       )
       applyFetchedYoutubeVideo(verified.url, verified.title)
-      setShowUnlistedVerify(false)
       setStudioVideoUrlInput('')
       setYtStatusNote(`Verified on YouTube (${verified.url}) & placed into all social posts`)
       notify(`Verified YouTube video (${verified.url}) & placed in all social posts ✓`)
@@ -622,6 +534,24 @@ export default function SceneEditor({
       notify(msg)
     } finally {
       setYtChecking(false)
+    }
+  }
+
+  const handleGrabClipboardStudioLink = async () => {
+    if (!navigator.clipboard?.readText) {
+      notify('Paste your https://youtu.be/... link into the box below')
+      return
+    }
+    try {
+      const clip = (await navigator.clipboard.readText()).trim()
+      if (!clip) {
+        notify('Clipboard is empty — click Copy video link in YouTube Studio first')
+        return
+      }
+      setStudioVideoUrlInput(clip)
+      await handleVerifyStudioVideoUrl(clip)
+    } catch {
+      notify('Browser blocked clipboard read — paste your https://youtu.be/... link into the box below')
     }
   }
 
@@ -666,11 +596,11 @@ export default function SceneEditor({
               </div>
               <a
                 className="btn btn-ghost btn-sm"
-                href="https://studio.youtube.com"
+                href={youtubeStudioUploadUrl}
                 target="_blank"
                 rel="noreferrer"
               >
-                <Youtube size={15} color="#FF0033" /> Open YouTube Studio <ExternalLink size={12} />
+                <Youtube size={15} color="#FF0033" /> Open YouTube Upload Popup <ExternalLink size={12} />
               </a>
             </div>
 
@@ -1044,7 +974,7 @@ export default function SceneEditor({
 
             <div className="divider" />
 
-            {/* REAL YOUTUBE UPLOAD & VERIFIED PER-VIDEO URL */}
+            {/* ZERO-GOOGLE-LOGIN YOUTUBE UPLOAD DIALOG + PUBLIC VERIFICATION */}
             <div className={`yt-live-url-box ${ytBoostTarget.isSpecificVideo ? 'ready' : 'pending'}`}>
               <div className="yt-copy-head" style={{ marginBottom: 6 }}>
                 <span>
@@ -1052,14 +982,12 @@ export default function SceneEditor({
                   <strong>
                     {ytBoostTarget.isSpecificVideo
                       ? 'Verified on YouTube — Video URL Placed in All Social Posts'
-                      : 'Not Posted to YouTube Yet — Upload Video & Verify'}
+                      : 'Upload in YouTube Studio → Grab & Verify New Video URL (No Google Login Needed)'}
                   </strong>
                 </span>
                 <Badge tone={ytBoostTarget.isSpecificVideo ? 'live' : 'draft'}>
                   {ytBoostTarget.isSpecificVideo
                     ? '✓ Verified on YouTube'
-                    : ytUploading
-                    ? `Uploading ${ytUploadPct}%…`
                     : ytChecking
                     ? 'Verifying on YouTube…'
                     : 'Not posted yet'}
@@ -1114,35 +1042,11 @@ export default function SceneEditor({
               ) : (
                 <>
                   <p className="muted small" style={{ marginBottom: 10 }}>
-                    SceneBoost will <strong>never</strong> mark a post Live until a real video is uploaded and verified on YouTube. Use{' '}
-                    <strong>Upload &amp; Publish Video to YouTube</strong> below to upload the video + 4 items directly via the YouTube API, or upload manually in YouTube Studio and click{' '}
-                    <strong>Verify Newly Uploaded Video</strong>.
+                    No Google account connection is needed in SceneBoost: click{' '}
+                    <strong>1. Open YouTube Upload Popup</strong> to drop your video &amp; paste the 4 items in YouTube Studio, then either{' '}
+                    <strong>auto-detect your newly published video</strong> from your public channel or{' '}
+                    <strong>grab the <code>https://youtu.be/...</code> link</strong> shown in YouTube Studio right away.
                   </p>
-
-                  {ytUploading && (
-                    <div style={{ marginBottom: 12 }}>
-                      <div className="small" style={{ marginBottom: 4, color: 'var(--accent)' }}>
-                        {ytUploadStage || `Uploading to YouTube (${ytUploadPct}%)…`}
-                      </div>
-                      <div
-                        style={{
-                          height: 8,
-                          borderRadius: 999,
-                          background: 'rgba(255,255,255,0.08)',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: `${ytUploadPct}%`,
-                            height: '100%',
-                            background: 'var(--accent)',
-                            transition: 'width 180ms ease',
-                          }}
-                        />
-                      </div>
-                    </div>
-                  )}
 
                   {ytStatusNote && (
                     <p
@@ -1160,170 +1064,60 @@ export default function SceneEditor({
                     </p>
                   )}
 
-                  {connectedChannelLabel && (
-                    <p className="small" style={{ marginBottom: 8, color: 'var(--accent)' }}>
-                      ✓ Connected YouTube account: <strong>{connectedChannelLabel}</strong>
-                    </p>
-                  )}
-
-                  {showOauthBox && (
-                    <div className="gemini-key-inline" style={{ marginBottom: 12 }}>
-                      <div className="yt-copy-head" style={{ marginBottom: 6 }}>
-                        <span>
-                          <KeyRound size={13} style={{ verticalAlign: -2, marginRight: 6 }} />
-                          <strong>Connect YouTube Account (Google Cloud OAuth Client ID)</strong>
-                        </span>
-                        <button
-                          type="button"
-                          className="link-toggle-btn"
-                          onClick={() => setShowOauthBox(false)}
-                        >
-                          Close
-                        </button>
-                      </div>
-                      <p className="muted small" style={{ marginBottom: 8 }}>
-                        To let SceneBoost upload video files directly to your YouTube channel, create a Web OAuth 2.0 Client ID in{' '}
-                        <a
-                          href="https://console.cloud.google.com/apis/credentials"
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ textDecoration: 'underline' }}
-                        >
-                          Google Cloud Console
-                        </a>{' '}
-                        (with <strong>YouTube Data API v3</strong> enabled) and add{' '}
-                        <code>{typeof window !== 'undefined' ? window.location.origin : ''}</code> under{' '}
-                        <em>Authorized JavaScript origins</em>.
-                      </p>
-                      <div className="btn-row" style={{ marginBottom: 6 }}>
-                        <input
-                          type="text"
-                          style={{ flex: 1 }}
-                          value={oauthClientId}
-                          onChange={(e) => setOauthClientId(e.target.value)}
-                          placeholder="1234567890-abcdef.apps.googleusercontent.com"
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          disabled={connectingYt || !oauthClientId.trim()}
-                          onClick={() => void handleConnectYoutubeChannel()}
-                        >
-                          {connectingYt ? 'Connecting…' : 'Connect & Test Channel'}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-accent btn-sm"
-                          disabled={ytUploading || !oauthClientId.trim()}
-                          onClick={() => void handleDirectUploadToYoutube()}
-                        >
-                          <CloudUpload size={13} /> Save &amp; Upload Video
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* PRIMARY: DIRECT AUTOMATED UPLOAD TO YOUTUBE */}
                   <div className="btn-row" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="btn btn-accent btn-sm"
-                      disabled={ytUploading}
-                      onClick={() => void handleDirectUploadToYoutube()}
-                    >
-                      <CloudUpload size={14} />{' '}
-                      {ytUploading
-                        ? ytUploadStage || `Uploading (${ytUploadPct}%)…`
-                        : videoFile
-                        ? 'Upload & Publish Video to YouTube'
-                        : 'Attach Video & Upload to YouTube'}
-                    </button>
-
-                    <select
-                      className="select"
-                      style={{ height: 32, padding: '0 10px', fontSize: 12 }}
-                      value={ytPrivacy}
-                      onChange={(e) =>
-                        setYtPrivacy(e.target.value as 'public' | 'unlisted' | 'private')
-                      }
-                      title="YouTube visibility"
-                    >
-                      <option value="public">Visibility: Public</option>
-                      <option value="unlisted">Visibility: Unlisted</option>
-                      <option value="private">Visibility: Private</option>
-                    </select>
-
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => setShowOauthBox((v) => !v)}
-                    >
-                      <KeyRound size={13} />{' '}
-                      {oauthClientId.trim() ? 'YouTube API Settings' : 'Connect YouTube API'}
-                    </button>
-                  </div>
-
-                  {/* SECONDARY: MANUAL UPLOAD IN YOUTUBE STUDIO + STRICT VERIFICATION */}
-                  <div
-                    style={{
-                      paddingTop: 10,
-                      borderTop: '1px solid rgba(255,255,255,0.08)',
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      alignItems: 'center',
-                      gap: 8,
-                    }}
-                  >
-                    <span className="muted small" style={{ marginRight: 4 }}>
-                      Or upload manually in YouTube Studio first:
-                    </span>
                     <a
-                      className="btn btn-ghost btn-sm"
-                      href="https://studio.youtube.com"
+                      className="btn btn-accent btn-sm"
+                      href={youtubeStudioUploadUrl}
                       target="_blank"
                       rel="noreferrer"
+                      onClick={() => {
+                        void copyText(ytPack.descriptionWithCredits)
+                        notify('Copied YouTube script + credits & opened YouTube Upload popup ✓')
+                      }}
                     >
-                      <Youtube size={14} color="#FF0033" /> Open YouTube Studio <ExternalLink size={11} />
+                      <Youtube size={14} /> 1. Open YouTube Upload Popup (&amp; Copy Script + Credits){' '}
+                      <ExternalLink size={11} />
                     </a>
+
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
-                      disabled={ytChecking || ytUploading}
+                      disabled={ytChecking}
                       onClick={() => void checkYoutubeForPublishedPost()}
                     >
                       <RefreshCw size={13} />{' '}
                       {ytChecking
-                        ? 'Verifying on YouTube…'
-                        : 'I Uploaded in Studio — Verify New Video'}
+                        ? 'Checking Public Channel…'
+                        : '2A. Auto-Detect New Video on Public Channel'}
                     </button>
+
                     <button
                       type="button"
-                      className="link-toggle-btn"
-                      onClick={() => setShowUnlistedVerify((v) => !v)}
+                      className="btn btn-ghost btn-sm"
+                      disabled={ytChecking}
+                      onClick={() => void handleGrabClipboardStudioLink()}
                     >
-                      {showUnlistedVerify ? 'Hide Unlisted URL check ▲' : 'Uploaded as Unlisted? Verify URL ▼'}
+                      <ClipboardPaste size={13} /> 2B. Grab Copied Studio Link &amp; Verify
                     </button>
                   </div>
 
-                  {showUnlistedVerify && (
-                    <div className="btn-row" style={{ marginTop: 8 }}>
-                      <input
-                        type="url"
-                        style={{ flex: 1 }}
-                        value={studioVideoUrlInput}
-                        onChange={(e) => setStudioVideoUrlInput(e.target.value)}
-                        placeholder="Paste newly created https://youtu.be/... link from YouTube Studio to verify"
-                      />
-                      <button
-                        type="button"
-                        className="btn btn-accent btn-sm"
-                        disabled={ytChecking || !studioVideoUrlInput.trim()}
-                        onClick={() => void handleVerifyStudioVideoUrl()}
-                      >
-                        Verify on YouTube
-                      </button>
-                    </div>
-                  )}
+                  <div className="btn-row">
+                    <input
+                      type="url"
+                      style={{ flex: 1 }}
+                      value={studioVideoUrlInput}
+                      onChange={(e) => setStudioVideoUrlInput(e.target.value)}
+                      placeholder="Or paste the newly created https://youtu.be/... video link from YouTube Studio (instant, works even before RSS updates)"
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-accent btn-sm"
+                      disabled={ytChecking || !studioVideoUrlInput.trim()}
+                      onClick={() => void handleVerifyStudioVideoUrl()}
+                    >
+                      Verify &amp; Place in Social Posts
+                    </button>
+                  </div>
                 </>
               )}
             </div>
