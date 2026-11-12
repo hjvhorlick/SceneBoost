@@ -173,7 +173,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
       const seoTags = await generateSeoTagsWithGemini({
         apiKey: key,
         title: scene.title,
-        topDescription: extractTopDescription(scene.description, 300),
+        topDescription: extractTopDescription(scene.description, 600),
       })
       onUpdateScene({
         ...scene,
@@ -290,7 +290,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
 
           <div className="yt-copy-block">
             <div className="yt-copy-head">
-              <strong>2. Top Description &amp; Credits</strong>
+              <strong>2. Script Description + Complete Credit Document (YouTube Only)</strong>
               <button
                 type="button"
                 className="btn btn-accent btn-sm"
@@ -298,11 +298,11 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
                   void doCopy(
                     'yt-desc',
                     ytPack.descriptionWithCredits,
-                    'Description + credits copied ✓'
+                    'Script + complete credit document copied ✓'
                   )
                 }
               >
-                {copied === 'yt-desc' ? <Check size={13} /> : <Copy size={13} />} Copy description + credits
+                {copied === 'yt-desc' ? <Check size={13} /> : <Copy size={13} />} Copy script + full credits
               </button>
             </div>
             <pre className="code-block tall">{ytPack.descriptionWithCredits}</pre>
@@ -468,14 +468,15 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
         </div>
       </div>
 
-      {/* OTHER SOCIAL POSTS — AUTOMATICALLY LOCKED TO YOUTUBE LINK */}
+      {/* OTHER SOCIAL POSTS — SCRIPT ONLY + SCENERING.COM + YOUTUBE LINK */}
       <div className="card boost-step-card">
         <div className="card-head">
           <div>
-            <div className="step-kicker boost-kicker">OTHER SOCIAL POSTS — PLAYS IN YOUTUBE</div>
+            <div className="step-kicker boost-kicker">OTHER SOCIAL POSTS — SCRIPT + SCENERING.COM + YOUTUBE LINK</div>
             <h3>Other Social Posts (tailored per platform)</h3>
             <p>
-              Uses only the top part of the description and automatically uses your fetched YouTube video link.
+              Uses only the short description (the script — no credit document), always includes{' '}
+              <code>https://scenering.com</code>, and plays the video via its fetched YouTube URL.
             </p>
           </div>
           <Share2 size={18} className="muted-icon" />

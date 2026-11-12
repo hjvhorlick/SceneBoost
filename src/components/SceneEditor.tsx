@@ -336,7 +336,7 @@ export default function SceneEditor({
       const nextTitle = shouldUpdateTitle ? imported.title : d.title
       const nextSlug =
         shouldUpdateTitle && !slugTouched ? slugify(imported.title) : d.slug
-      const nextTopDesc = imported.shortDescription || extractTopDescription(d.description, 300)
+      const nextTopDesc = imported.shortDescription || extractTopDescription(d.description, 600)
       const nextCredits = imported.credits || d.credits
       const nextTags = generateYoutubeRankingTags({
         title: nextTitle,
@@ -389,7 +389,7 @@ export default function SceneEditor({
     setGeminiBusy(true)
     try {
       saveGeminiApiKey(activeKey)
-      const topDesc = extractTopDescription(draft.description, 300)
+      const topDesc = extractTopDescription(draft.description, 600)
       const seoTags = await generateSeoTagsWithGemini({
         apiKey: activeKey,
         title: draft.title,
@@ -650,10 +650,10 @@ export default function SceneEditor({
               />
             </div>
 
-            {/* ITEM 2 — TOP PART OF DESCRIPTION + CREDITS */}
+            {/* ITEM 2 — SHORT DESCRIPTION (SCRIPT) + COMPLETE CREDIT DOCUMENT (YOUTUBE ONLY) */}
             <div className="four-item-box">
               <div className="yt-copy-head">
-                <strong>2. Description (top part only) &amp; Credits</strong>
+                <strong>2. Script Description + Complete Credit Document (YouTube Only)</strong>
                 <div className="btn-row" style={{ gap: 8 }}>
                   <span className="char-pill">{ytPack.descriptionWithCredits.length} / 5000</span>
                   <button
@@ -663,39 +663,39 @@ export default function SceneEditor({
                       void doCopy(
                         'yt-desc',
                         ytPack.descriptionWithCredits,
-                        'YouTube description & credits'
+                        'YouTube script & complete credit document'
                       )
                     }
                   >
-                    {copied === 'yt-desc' ? <Check size={13} /> : <Copy size={13} />} Copy description + credits
+                    {copied === 'yt-desc' ? <Check size={13} /> : <Copy size={13} />} Copy script + full credits
                   </button>
                 </div>
               </div>
 
               <label className="field" style={{ marginBottom: 10 }}>
                 <span className="muted small">
-                  Top part of description (used for YouTube &amp; all social posts)
+                  Short description — the script (used for YouTube &amp; all other social posts; <code>https://scenering.com</code> is placed at the end of the script section)
                 </span>
                 <textarea
                   rows={3}
                   value={draft.description}
                   onChange={(e) => set('description', e.target.value)}
-                  placeholder="Opening summary of the video (only this top part is used across social posts)…"
+                  placeholder="Short description from your script…"
                 />
               </label>
 
               <div className="step1-toggles-row" style={{ marginBottom: 8 }}>
                 <span className="muted small">
                   {draft.credits?.trim()
-                    ? '✓ Credits fetched from folder and attached below for YouTube'
-                    : 'No credits block loaded yet (import folder or paste below if needed)'}
+                    ? '✓ Complete credit document attached for YouTube only (YouTube plays & stores the video)'
+                    : 'No credit document loaded yet (select Scenering folder or paste below)'}
                 </span>
                 <button
                   type="button"
                   className="link-toggle-btn"
                   onClick={() => setShowCreditsEditor((v) => !v)}
                 >
-                  {showCreditsEditor ? 'Hide credits editor ▲' : 'View / edit fetched credits ▼'}
+                  {showCreditsEditor ? 'Hide credit document ▲' : 'View / edit credit document ▼'}
                 </button>
               </div>
 
@@ -1057,15 +1057,16 @@ export default function SceneEditor({
           </div>
 
           {/* =========================================================
-              OTHER SOCIAL POSTS — AUTOMATICALLY LOCKED TO YOUTUBE LINK
+              OTHER SOCIAL POSTS — SCRIPT ONLY + SCENERING WEBSITE + YOUTUBE LINK
              ========================================================= */}
           <div className="card boost-step-card">
             <div className="card-head">
               <div>
-                <div className="step-kicker boost-kicker">OTHER SOCIAL POSTS — PLAYS IN YOUTUBE</div>
+                <div className="step-kicker boost-kicker">OTHER SOCIAL POSTS — SCRIPT + SCENERING.COM + YOUTUBE LINK</div>
                 <h3>Fetch platform-ready social posts from SceneBoost</h3>
                 <p>
-                  Formatted the way each platform needs it — uses only the top part of your description, with the YouTube link automatically locked in so every viewer plays the video in YouTube.
+                  Uses only the short description (the script — no credit document), always includes{' '}
+                  <code>https://scenering.com</code>, and locks in this video’s YouTube URL to play the video in YouTube.
                 </p>
               </div>
               <Share2 size={18} className="muted-icon" />

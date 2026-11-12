@@ -112,34 +112,71 @@ function cleanTitleFromName(raw: string): string {
     .trim()
 }
 
+export const SCENERING_WEBSITE_URL = 'https://scenering.com'
+
 /**
- * Extracts ONLY the top part of a description (opening paragraph / first 1-3
- * sentences, cleanly trimmed on a sentence boundary) and strips any trailing
- * credits or metadata sections.
+ * Removes any standalone / trailing `scenering.com` line from a script block so
+ * platform formatters can truncate the script cleanly and then always place
+ * `https://scenering.com` explicitly without ever duplicating or cutting it off.
  */
-export function extractTopDescription(rawText: string, maxLen = 300): string {
-  if (!rawText) return ''
-  const withoutCredits = rawText
+export function stripTrailingSceneringWebsite(text: string): string {
+  if (!text) return ''
+  return text
     .replace(/\r\n/g, '\n')
-    .split(/\n\s*(?:📢\s*CREDITS|CREDITS\s*&\s*ATTRIBUTIONS|COPY\s*&\s*PASTE|[-=]{6,})/i)[0]
-    .replace(/---\s*Scene\s*\d+\s*---/gi, '\n\n')
+    .replace(
+      /(?:\n+|\s+)(?:(?:Created\s+(?:and\s+rendered\s+)?with\s+Scenering(?:\s+Video\s+Studio)?|Website|Scenering)\s*:\s*)?https?:\/\/(?:www\.)?scenering\.com\/?\s*$/i,
+      ''
+    )
+    .trim()
+}
+
+/**
+ * Ensures `https://scenering.com` appears at the end of the script section
+ * (used in YouTube's description right before the complete credit document).
+ */
+export function ensureSceneringAtEndOfScript(
+  scriptText: string,
+  siteUrl = SCENERING_WEBSITE_URL
+): string {
+  const clean = scriptText.trim()
+  const cleanSite = siteUrl.trim() || SCENERING_WEBSITE_URL
+  if (!clean) return `Created with Scenering: ${cleanSite}`
+  if (/scenering\.com/i.test(clean)) return clean
+  return `${clean}\n\nCreated with Scenering: ${cleanSite}`
+}
+
+/**
+ * Extracts the short description (the script opening) and strips any credit
+ * document sections so social posts NEVER include the credit wall.
+ */
+export function extractTopDescription(rawText: string, maxLen = 600): string {
+  if (!rawText) return ''
+  const normalized = rawText.replace(/\r\n/g, '\n')
+
+  // Strip any credit/attribution sections (`📢 CREDITS`, `🎙️`, `🎵`, `🔊`, `🎨`, `📸`, etc.)
+  const withoutCredits = normalized
+    .split(
+      /\n\s*(?:📢\s*CREDITS|CREDITS\s*&\s*ATTRIBUTIONS|COPY\s*&\s*PASTE|(?:🎙️|🎵|🔊|🎨|📸)\s*[A-Z0-9]|[-=]{6,})/i
+    )[0]
+    .replace(/---\s*Scene\s*\d+\s*---/gi, ' ')
     .trim()
 
   if (!withoutCredits) return ''
 
-  // Take only the first non-empty paragraph (the top part of the description)
-  const paragraphs = withoutCredits
-    .split(/\n\s*\n/)
+  // Join spoken script paragraphs cleanly up to maxLen on a sentence boundary
+  const joined = withoutCredits
+    .split(/\n+/)
     .map((p) => p.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
+    .join(' ')
+    .trim()
 
-  const topParagraph = paragraphs[0] || ''
-  if (!topParagraph) return ''
-  if (topParagraph.length <= maxLen) return topParagraph
+  if (!joined) return ''
+  if (joined.length <= maxLen) return joined
 
-  const cut = topParagraph.slice(0, maxLen)
-  const lastPeriod = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '))
-  if (lastPeriod > 70) return cut.slice(0, lastPeriod + 1).trim()
+  const cut = joined.slice(0, maxLen)
+  const lastStop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '))
+  if (lastStop > maxLen * 0.4) return cut.slice(0, lastStop + 1).trim()
   const lastSpace = cut.lastIndexOf(' ')
   return `${(lastSpace > 80 ? cut.slice(0, lastSpace) : cut).trim()}…`
 }
@@ -472,17 +509,35 @@ export function parseSceneringCreditsText(rawText: string): {
     }
   }
 
-  // 4. Extract `📢 CREDITS & ATTRIBUTIONS` block
+  // 4. Extract `📢 CREDITS & ATTRIBUTIONS` complete credit document (for YouTube ONLY)
+  //    AND extract the script opening placed right below `📢 CREDITS & ATTRIBUTIONS`
+  //    before the first asset licence section (`🎙️`, `🎵`, `🔊`, `🎨`, `📸`)
   let credits = ''
-  const creditsIdx = text.search(/📢\s*CREDITS\s*&\s*ATTRIBUTIONS|^CREDITS\s*&\s*ATTRIBUTIONS/im)
-  if (creditsIdx >= 0) {
-    let block = text.slice(creditsIdx)
-    block = block.replace(/\n[-=]{10,}\nReview every asset[\s\S]*$/i, '')
-    block = block.replace(/\n={10,}\s*$/, '').trim()
-    credits = block
+  const creditsHeadingMatch = text.match(/^(?:📢\s*)?CREDITS\s*&\s*ATTRIBUTIONS[^\n]*$/im)
+  if (creditsHeadingMatch && creditsHeadingMatch.index !== undefined) {
+    const headingLine = creditsHeadingMatch[0].trim()
+    const afterHeading = text
+      .slice(creditsHeadingMatch.index + creditsHeadingMatch[0].length)
+      .replace(/\n={10,}\s*$/, '')
+      .trim()
+
+    const assetStartMatch = afterHeading.match(
+      /^(?:🎙️|🎵|🔊|🎨|📸|🎬|🖼️)|^(?:VOICEOVER|BACKGROUND\s+MUSIC|SOUND\s+EFFECTS|OTHER\s+AUDIO|3D\s+GRAPHICS|STOCK\s+IMAGES)\b|^-{10,}\nReview every asset|^This older render was saved/im
+    )
+
+    if (assetStartMatch && assetStartMatch.index !== undefined) {
+      const openingScript = afterHeading.slice(0, assetStartMatch.index).trim()
+      const assetCreditsBody = afterHeading.slice(assetStartMatch.index).trim()
+      if (!rawDescription && openingScript) {
+        rawDescription = openingScript
+      }
+      credits = `${headingLine}\n\n${assetCreditsBody}`.trim()
+    } else {
+      credits = `${headingLine}\n\n${afterHeading}`.trim()
+    }
   }
 
-  // 5. Plain description/script file fallback — take ONLY the top part!
+  // 5. Plain script / description file fallback (`*_script.txt`, etc.)
   const isAttributionHeader = /VIDEO CREDITS\s*&\s*MEDIA ATTRIBUTIONS/i.test(text)
   if (!rawDescription && !isAttributionHeader && !credits) {
     const bodyLines = lines
@@ -494,7 +549,7 @@ export function parseSceneringCreditsText(rawText: string): {
 
   return {
     title,
-    shortDescription: extractTopDescription(rawDescription, 300),
+    shortDescription: extractTopDescription(rawDescription, 600),
     credits,
     explicitTags,
   }
@@ -591,10 +646,16 @@ export async function parseSceneringFiles(fileList: FileList | File[]): Promise<
         if (!title && json.title) title = String(json.title).trim()
         const jsonDesc = json.shortDescription || json.description || json.summary
         if (!shortDescription && jsonDesc) {
-          shortDescription = extractTopDescription(String(jsonDesc), 300)
-        } else if (!shortDescription && Array.isArray(json.scenes) && json.scenes[0]?.text) {
-          // Only use the top opening scene text, never the entire script
-          shortDescription = extractTopDescription(String(json.scenes[0].text), 280)
+          shortDescription = extractTopDescription(String(jsonDesc), 600)
+        } else if (!shortDescription && Array.isArray(json.scenes) && json.scenes.length > 0) {
+          // Build the short description from the spoken script scenes (matching Scenering's scriptOpening)
+          const spokenScript = json.scenes
+            .map((s) => String(s?.text || '').trim())
+            .filter(Boolean)
+            .join(' ')
+          if (spokenScript) {
+            shortDescription = extractTopDescription(spokenScript, 600)
+          }
         }
         if (Array.isArray(json.tags)) {
           extraKeywords.push(...json.tags.map(String))
@@ -755,12 +816,13 @@ export function buildSeoHashtags(
 }
 
 /**
- * Builds ONLY the per-video content needed for YouTube Studio (since channel-wide
- * links/defaults are already configured in YouTube Channel Settings):
+ * Builds the YouTube Studio upload pack.
+ * YouTube is the ONE platform that plays and stores the video, so ONLY YouTube
+ * receives the complete credit document:
  * - Title
- * - Top part of Description + Fetched Credits
+ * - Short description (the script) with `https://scenering.com` at the end of the script section
+ *   + the COMPLETE Credit Document (`📢 CREDITS & ATTRIBUTIONS` and all licence details)
  * - SEO-Friendly Tags (<= 500 chars)
- * (+ Video & Thumbnail from the folder)
  */
 export function buildYoutubeStudioPack(
   scene: Pick<Scene, 'title' | 'description' | 'credits' | 'tags'>
@@ -768,20 +830,20 @@ export function buildYoutubeStudioPack(
   const rawTitle = scene.title.trim() || 'Untitled Video'
   const title = rawTitle.length <= 100 ? rawTitle : `${rawTitle.slice(0, 97).trim()}…`
 
-  const topDescription = extractTopDescription(scene.description, 350)
+  const cleanScript = stripTrailingSceneringWebsite(extractTopDescription(scene.description, 600))
+  const topDescription = ensureSceneringAtEndOfScript(cleanScript, SCENERING_WEBSITE_URL)
   const credits = scene.credits?.trim() || ''
 
-  const parts: string[] = []
-  if (topDescription) parts.push(topDescription)
+  const parts: string[] = [topDescription]
   if (credits) parts.push(credits)
-  const descriptionWithCredits = parts.join('\n\n') || title
+  const descriptionWithCredits = parts.join('\n\n')
 
   const tags =
     scene.tags && scene.tags.length > 0
       ? fitTagsWithinBudget(scene.tags, 500)
       : generateYoutubeRankingTags({
           title: scene.title,
-          shortDescription: topDescription,
+          shortDescription: cleanScript,
         })
   const tagsCsv = formatYoutubeTagsCsv(tags, 500)
 
@@ -803,11 +865,19 @@ function truncateText(text: string, maxLen: number): string {
   return `${(sp > maxLen * 0.6 ? cut.slice(0, sp) : cut).trim()}…`
 }
 
+export function resolveSceneringWebsiteUrl(platforms?: PlatformSettings[]): string {
+  const configured = platforms?.find((p) => p.id === 'website')?.defaultHandle?.trim()
+  if (configured && /^https?:\/\//i.test(configured)) return configured
+  return SCENERING_WEBSITE_URL
+}
+
 /**
- * Formats each social post in SceneBoost the exact way that platform needs it:
- * - Uses ONLY the top part of the description (no credit wall)
- * - Uses only SEO-friendly topic hashtags (no generic #fyp spam)
- * - Uses the YouTube link as the link that plays the video IN YouTube
+ * Formats each of the OTHER social posts in SceneBoost:
+ * - NO credit document (the complete credit document is ONLY in YouTube, which plays & stores the video)
+ * - Uses ONLY the short description (that is the script)
+ * - ALWAYS includes the Scenering website (`https://scenering.com`) in every description
+ *   (because in YouTube's description it only sits at the end of the script section)
+ * - Includes that video's fetched YouTube URL (`https://youtu.be/<id>`) to play the video in YouTube
  */
 export function buildSocialBoostPost(
   scene: Pick<Scene, 'title' | 'slug' | 'description' | 'tags' | 'videoUrl' | 'links'>,
@@ -819,54 +889,58 @@ export function buildSocialBoostPost(
 ): string {
   const { url: resolvedYtUrl } = resolveYoutubeBoostUrl(scene, options?.platforms)
   const watchUrl = options?.overrideTargetUrl?.trim() || resolvedYtUrl
-  const topDesc = extractTopDescription(scene.description, 280)
-  const descBlock = topDesc ? `\n\n${topDesc}` : ''
+  const sceneringUrl = resolveSceneringWebsiteUrl(options?.platforms)
+
+  // Clean script text without any credit wall and without trailing scenering.com
+  // so we can fit each platform's length and ALWAYS include scenering.com explicitly.
+  const scriptDesc = stripTrailingSceneringWebsite(extractTopDescription(scene.description, 600))
+  const descBlock = scriptDesc ? `\n\n${scriptDesc}` : ''
   const seoHashtags3 = buildSeoHashtags(scene, 3).join(' ')
   const seoHashtags2 = buildSeoHashtags(scene, 2).join(' ')
   const seoHashtag1 = buildSeoHashtags(scene, 1)[0] || ''
 
   switch (platform) {
     case 'facebook':
-      // Facebook: clean hook + top description + standalone YouTube URL for native clickable preview card
-      return `${scene.title}${descBlock}\n\nWatch the full video on YouTube:\n${watchUrl}${seoHashtags3 ? `\n\n${seoHashtags3}` : ''}`
+      // Facebook: Title + short description (script) + YouTube watch URL + Scenering website
+      return `${scene.title}${descBlock}\n\nWatch the full video on YouTube:\n${watchUrl}\n\nCreated with Scenering: ${sceneringUrl}${seoHashtags3 ? `\n\n${seoHashtags3}` : ''}`
 
     case 'linkedin':
-      // LinkedIn: professional summary + direct YouTube watch link + 3 SEO topic hashtags
-      return `${scene.title}${descBlock}\n\nWatch the video on YouTube: ${watchUrl}${seoHashtags3 ? `\n\n${seoHashtags3}` : ''}`
+      // LinkedIn: Title + short description (script) + YouTube watch URL + Scenering website
+      return `${scene.title}${descBlock}\n\nWatch the video on YouTube: ${watchUrl}\nCreated with Scenering: ${sceneringUrl}${seoHashtags3 ? `\n\n${seoHashtags3}` : ''}`
 
     case 'tiktok': {
-      // TikTok: concise teaser caption + top description + YouTube watch destination + SEO topic tags
-      const shortDesc = topDesc ? `\n\n${truncateText(topDesc, 150)}` : ''
-      return `${scene.title}${shortDesc}\n\nFull video on YouTube: ${watchUrl}${seoHashtags3 ? `\n\n${seoHashtags3}` : ''}`
+      // TikTok: Title + script teaser + YouTube watch URL + Scenering website
+      const shortScript = scriptDesc ? `\n\n${truncateText(scriptDesc, 220)}` : ''
+      return `${scene.title}${shortScript}\n\nFull video on YouTube: ${watchUrl}\nCreated with Scenering: ${sceneringUrl}${seoHashtags3 ? `\n\n${seoHashtags3}` : ''}`
     }
 
     case 'x': {
-      // X / Twitter: strict <= 280 character budget (URLs count as 23 chars on X)
-      const head = truncateText(scene.title, 72)
-      const tail = `\n\n▶️ ${watchUrl}${seoHashtags2 ? `\n${seoHashtags2}` : ''}`
-      const usedApprox = head.length + 28 + seoHashtags2.length + 10
+      // X / Twitter: strict <= 280 chars (each URL counts as 23 chars on X) — BOTH YouTube URL & Scenering website ALWAYS included
+      const head = truncateText(scene.title, 66)
+      const tail = `\n\n▶️ ${watchUrl}\n🌐 ${sceneringUrl}${seoHashtags2 ? `\n${seoHashtags2}` : ''}`
+      const usedApprox = head.length + 54 + seoHashtags2.length + 8
       const budget = 274 - usedApprox
-      const mid = topDesc && budget > 35 ? `\n\n${truncateText(topDesc, budget)}` : ''
+      const mid = scriptDesc && budget > 30 ? `\n\n${truncateText(scriptDesc, budget)}` : ''
       return `${head}${mid}${tail}`
     }
 
     case 'threads': {
-      // Threads: conversational <= 500 chars + single topic tag (Threads supports 1 tag per post)
-      const shortDesc = topDesc ? `\n\n${truncateText(topDesc, 220)}` : ''
-      return `${scene.title}${shortDesc}\n\nWatch on YouTube:\n${watchUrl}${seoHashtag1 ? `\n\n${seoHashtag1}` : ''}`
+      // Threads: <= 500 chars — script + YouTube watch URL + Scenering website ALWAYS included
+      const shortScript = scriptDesc ? `\n\n${truncateText(scriptDesc, 210)}` : ''
+      return `${scene.title}${shortScript}\n\nWatch on YouTube: ${watchUrl}\nCreated with Scenering: ${sceneringUrl}${seoHashtag1 ? `\n\n${seoHashtag1}` : ''}`
     }
 
     case 'twitch':
-      // Twitch / Kick community post or stream announcement
-      return `New video on YouTube: ${scene.title}${descBlock}\n\nWatch here: ${watchUrl}`
+      // Twitch / Kick: Title + short description (script) + YouTube watch URL + Scenering website
+      return `New video on YouTube: ${scene.title}${descBlock}\n\nWatch on YouTube: ${watchUrl}\nCreated with Scenering: ${sceneringUrl}`
 
     case 'vimeo':
-      // Vimeo showcase / teaser description pointing to YouTube full watch
-      return `${scene.title}${descBlock}\n\nWatch on YouTube: ${watchUrl}`
+      // Vimeo: Title + short description (script) + YouTube watch URL + Scenering website
+      return `${scene.title}${descBlock}\n\nWatch on YouTube: ${watchUrl}\nCreated with Scenering: ${sceneringUrl}`
 
     case 'whatsapp':
-      // WhatsApp native bold title + top description + YouTube URL for rich preview
-      return `*${scene.title}*${descBlock}\n\nWatch on YouTube:\n${watchUrl}`
+      // WhatsApp: Bold title + short description (script) + YouTube watch URL + Scenering website
+      return `*${scene.title}*${descBlock}\n\nWatch on YouTube: ${watchUrl}\nCreated with Scenering: ${sceneringUrl}`
   }
 }
 
