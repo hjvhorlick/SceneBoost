@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FolderOpen, FileText } from 'lucide-react'
+import { FolderOpen, FileText, ImagePlus } from 'lucide-react'
 import Sidebar, { type View } from './components/Sidebar'
 import Dashboard from './components/Dashboard'
 import Scenes from './components/Scenes'
@@ -10,10 +10,14 @@ import Platforms from './components/Platforms'
 import Settings from './components/Settings'
 import PublicHub from './components/PublicHub'
 import { Modal, Toast } from './components/ui'
-import { parseSceneringFiles } from './lib/scenering'
+import {
+  generateYoutubeRankingTags,
+  parseSceneringFiles,
+  renderImageFileToYoutubeThumbnail,
+} from './lib/scenering'
 import { loadData, saveData, resetData } from './lib/store'
 import { slugify, uid } from './lib/utils'
-import type { AppData, PlatformId, Scene } from './types'
+import type { AppData, PlatformId, Scene, SceneLink } from './types'
 
 function parseHash(): { view: View; sceneId: string | null; hubSlug: string | null } {
   const hash = window.location.hash.replace(/^#\/?/, '')
@@ -38,9 +42,12 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [newTitle, setNewTitle] = useState('')
+  const [newThumbDataUrl, setNewThumbDataUrl] = useState('')
+  const [newThumbName, setNewThumbName] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Scene | null>(null)
   const createFolderRef = useRef<HTMLInputElement | null>(null)
   const createFileRef = useRef<HTMLInputElement | null>(null)
+  const createThumbRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     saveData(data)
@@ -77,6 +84,36 @@ export default function App() {
     setRoute(parseHash())
   }, [])
 
+  const buildInitialSceneLinks = useCallback((): SceneLink[] => {
+    const ytUrl =
+      data.platforms.find((p) => p.id === 'youtube')?.defaultHandle?.trim() ||
+      'https://www.youtube.com/channel/UCV9v30xQPdbhwM5lAZC2MRQ'
+    const webPlatform = data.platforms.find((p) => p.id === 'website')
+    const links: SceneLink[] = [
+      {
+        id: uid(),
+        platform: 'youtube',
+        label: 'Watch Full Video on YouTube',
+        url: ytUrl,
+        enabled: true,
+        clicks: 0,
+        order: 0,
+      },
+    ]
+    if (webPlatform?.connected && webPlatform.defaultHandle.trim()) {
+      links.push({
+        id: uid(),
+        platform: 'website',
+        label: 'Visit Scenering',
+        url: webPlatform.defaultHandle.trim(),
+        enabled: true,
+        clicks: 0,
+        order: 1,
+      })
+    }
+    return links
+  }, [data.platforms])
+
   const createScene = () => {
     const title = newTitle.trim() || 'Untitled scene'
     const slugBase = slugify(title)
@@ -86,13 +123,15 @@ export default function App() {
       title,
       slug: exists ? `${slugBase}-${uid().slice(0, 4)}` : slugBase,
       description: '',
-      thumbnail: 'neon',
+      tags: generateYoutubeRankingTags({ title }),
+      thumbnail: newThumbDataUrl || 'neon',
+      thumbnailFileName: newThumbName || undefined,
       videoUrl: '',
       status: 'draft',
       accent: data.settings.accent,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      links: [],
+      links: buildInitialSceneLinks(),
     }
     setData((d) => ({
       ...d,
@@ -104,7 +143,9 @@ export default function App() {
     }))
     setShowCreate(false)
     setNewTitle('')
-    notify('Scene created — add your platform links')
+    setNewThumbDataUrl('')
+    setNewThumbName('')
+    notify('Video created — Step 1: check SEO tags & thumbnail, then upload to YouTube!')
     navigate('editor', scene.id)
   }
 
@@ -119,15 +160,17 @@ export default function App() {
       title,
       slug: exists ? `${slugBase}-${uid().slice(0, 4)}` : slugBase,
       description: imported.shortDescription || '',
+      tags: imported.tags,
       credits: imported.credits || undefined,
       videoFileName: imported.videoFileName || undefined,
-      thumbnail: 'neon',
+      thumbnail: newThumbDataUrl || imported.thumbnailDataUrl || 'neon',
+      thumbnailFileName: newThumbName || imported.thumbnailFileName || undefined,
       videoUrl: '',
       status: 'draft',
       accent: data.settings.accent,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      links: [],
+      links: buildInitialSceneLinks(),
     }
     setData((d) => ({
       ...d,
@@ -139,11 +182,9 @@ export default function App() {
     }))
     setShowCreate(false)
     setNewTitle('')
-    notify(
-      imported.shortDescription
-        ? 'Scene + short description imported from Scenering ✓'
-        : 'Scene created from Scenering folder — add your platform links'
-    )
+    setNewThumbDataUrl('')
+    setNewThumbName('')
+    notify('Imported credit page, SEO tags & thumbnail — ready to upload to YouTube first ✓')
     navigate('editor', scene.id)
   }
 
@@ -326,7 +367,14 @@ export default function App() {
 
         {route.view === 'analytics' && <Analytics data={data} />}
 
-        {route.view === 'share' && <ShareKit data={data} notify={notify} />}
+        {route.view === 'share' && (
+          <ShareKit
+            data={data}
+            onEditScene={(id) => navigate('editor', id)}
+            onUpdateScene={saveScene}
+            notify={notify}
+          />
+        )}
 
         {route.view === 'platforms' && (
           <Platforms data={data} onToggle={togglePlatform} onHandle={setPlatformHandle} notify={notify} />
@@ -342,14 +390,14 @@ export default function App() {
         )}
       </main>
 
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create a new scene">
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New YouTube-First Video Boost">
         <p className="muted" style={{ marginBottom: 14 }}>
-          Start from your Scenering saved folder (pulls the video title, short description and credits automatically), or enter a title manually.
+          Import your Scenering saved folder (reads title, credit page, SEO ranking tags &amp; thumbnail automatically), then post to YouTube first and boost from every social platform.
         </p>
         <div className="scenering-import-bar" style={{ marginBottom: 14 }}>
           <div>
-            <strong>Import Scenering folder</strong>
-            <p className="muted small">Reads short description from credits in the same folder</p>
+            <strong>1. Import Scenering folder &amp; credit page</strong>
+            <p className="muted small">Auto-extracts description, credits, SEO tags &amp; 1280×720 thumbnail</p>
           </div>
           <div className="btn-row">
             <input
@@ -374,9 +422,28 @@ export default function App() {
                 e.target.value = ''
               }}
             />
+            <input
+              ref={createThumbRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (!file) return
+                try {
+                  const dataUrl = await renderImageFileToYoutubeThumbnail(file)
+                  setNewThumbDataUrl(dataUrl)
+                  setNewThumbName(file.name)
+                  notify(`Thumbnail ready: ${file.name} ✓`)
+                } catch {
+                  notify('Could not read thumbnail image')
+                }
+              }}
+            />
             <button
               type="button"
-              className="btn btn-ghost btn-sm"
+              className="btn btn-accent btn-sm"
               onClick={() => createFolderRef.current?.click()}
             >
               <FolderOpen size={14} /> Select folder
@@ -388,22 +455,34 @@ export default function App() {
             >
               <FileText size={14} /> Credits (.txt)
             </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => createThumbRef.current?.click()}
+            >
+              <ImagePlus size={14} /> {newThumbName ? 'Thumbnail ✓' : 'Thumbnail'}
+            </button>
           </div>
         </div>
+        {newThumbName && (
+          <p className="small" style={{ marginBottom: 10, color: 'var(--accent)' }}>
+            🖼️ Imported 1280×720 thumbnail: <code>{newThumbName}</code>
+          </p>
+        )}
         <label className="field">
-          <span>Or type scene title</span>
+          <span>Or enter video title manually</span>
           <input
             autoFocus
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && createScene()}
-            placeholder="e.g. Neon Nights — Official Video"
+            placeholder="e.g. How Ancient Rome Built an Unstoppable Empire"
           />
-          {newTitle.trim() && <span className="field-hint">Hub URL will be /s/{slugify(newTitle)}</span>}
+          {newTitle.trim() && <span className="field-hint">Slug: /s/{slugify(newTitle)}</span>}
         </label>
         <div className="btn-row" style={{ marginTop: 16 }}>
           <button className="btn btn-accent" onClick={createScene}>
-            Create scene
+            Continue to YouTube SEO Pack
           </button>
           <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>
             Cancel

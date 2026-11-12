@@ -28,10 +28,12 @@ export interface Scene {
   title: string
   slug: string
   description: string
+  tags?: string[] // YouTube SEO ranking tags (comma-separated <= 500 chars)
   credits?: string // optional media attribution block from Scenering credits.txt
   videoFileName?: string // optional rendered video file detected in Scenering folder
-  thumbnail: string // gradient key or image url
-  videoUrl: string
+  thumbnailFileName?: string // optional custom imported thumbnail filename
+  thumbnail: string // Scenering cover preset key or imported 1280x720 image data URL
+  videoUrl: string // Published YouTube video URL (primary boost destination)
   status: SceneStatus
   accent: string // hex
   createdAt: string

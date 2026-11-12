@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Play, ExternalLink, Copy, Check, Zap, ArrowLeft, Share2 } from 'lucide-react'
 import type { Scene } from '../types'
 import { coverStyle, platformById, resolveCoverImageUrl } from '../lib/platforms'
+import { resolveYoutubeBoostUrl } from '../lib/scenering'
 import { buildTrackedUrl, copyText, hubUrl } from '../lib/utils'
 import { Badge } from './ui'
 
@@ -19,6 +20,7 @@ export default function PublicHub({ scene, defaultMedium, defaultCampaign, brand
   const [shared, setShared] = useState(false)
 
   const enabled = [...scene.links].sort((a, b) => a.order - b.order).filter((l) => l.enabled && l.url.trim())
+  const ytTarget = resolveYoutubeBoostUrl(scene)
 
   useEffect(() => {
     const prevTitle = document.title
@@ -77,9 +79,9 @@ export default function PublicHub({ scene, defaultMedium, defaultCampaign, brand
             </span>
             <h1>{scene.title}</h1>
             <p>{scene.description}</p>
-            {scene.videoUrl && (
-              <a className="btn btn-accent" href={scene.videoUrl} target="_blank" rel="noreferrer">
-                <Play size={16} /> Watch now
+            {ytTarget.url && (
+              <a className="btn btn-accent" href={ytTarget.url} target="_blank" rel="noreferrer">
+                <Play size={16} /> Watch Full Video on YouTube
               </a>
             )}
           </div>

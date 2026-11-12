@@ -1,10 +1,12 @@
 # SceneBoost
 
-**Create marketing links to social media and video platforms.**
+**YouTube-first video ranking & social boost studio.**
 
-SceneBoost gives creators, artists and brands one smart link per *scene* (a video, drop or campaign) that fans can use to watch, stream and share across every video and social platform — with UTM tracking built in so you know which platform is actually boosting the scene.
+SceneBoost is built around a **YouTube-first growth & monetization workflow**:
 
-> One scene. One link. Every platform.
+1. **Step 1 — Import your Scenering video folder, credit page & thumbnail**: Pulls the project title, short description, `📢 CREDITS & ATTRIBUTIONS`, SEO ranking tags (up to 500 chars), and a **1280×720 HD YouTube thumbnail** (via direct image import, drag-and-drop, Scenering folder auto-detection, or grabbing a frame directly from your rendered Scenering video).
+2. **Step 2 — Publish to YouTube first with full ranking SEO**: Copy your keyword-ranked Title, Description (short description in lines 1–2, `?sub_confirmation=1` subscribe & watch-more CTA, optional `scenering.com` website toggle, full credit page, and search hashtags), 500-character YouTube Studio Tags, and 1280×720 thumbnail straight into YouTube Studio — then paste your live YouTube video URL.
+3. **Step 3 — Boost YouTube from every other social platform**: Generate ready-to-post teasers for Facebook, LinkedIn, TikTok, X, Threads, Twitch/Kick, Vimeo and WhatsApp that send viewers **straight to your YouTube video**, where they find more of your videos, subscribe, and grow watch hours to rank and monetize your channel.
 
 ---
 
