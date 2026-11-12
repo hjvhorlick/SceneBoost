@@ -18,14 +18,13 @@ SceneBoost is built around a **YouTube-first ranking & social boost workflow**:
 
 | Area | What you get |
 |---|---|
-| **Dashboard** | Total clicks, live scenes, active links, connected platforms, top scenes, clicks-by-platform and recent activity |
-| **Scenes** | Full CRUD for scenes — title, slug, short description, video URL, thumbnail style, accent colour, live/draft/paused status — plus **1-click import from a Scenering saved folder (`Videos/Scenering/<Video Name>`)** that reads the video name, short description and media credits from the folder's `*_attribution_credits.txt` |
+| **Dashboard** | Unified overview & click analytics — filter by post, export CSV, total clicks, live posts, active links, connected platforms, top posts, clicks-by-platform, recent activity, and full link table |
+| **Posts** | Full CRUD for posts — fetch your Scenering saved folder (`Videos/Scenering/<Video Name>`), prepare the 4 YouTube items (video/title, top description + credits, thumbnail, Gemini SEO tags), and generate social posts |
 | **Platform links** | Add a link per platform (YouTube, TikTok, Facebook, LinkedIn, X, Twitch, Kick, Vimeo, Threads, Instagram, Website/Custom), reorder, enable/disable, with automatic UTM parameters |
-| **Public hub** | A shareable page at `#/s/{slug}` with a hero, platform buttons, copy-link and native share — every click is tracked back to the scene + link |
-| **Analytics** | Clicks per platform, per scene and per link, leaderboard, and CSV export |
-| **Share Kit** | Copy hub link, copy tracked per-platform links, downloadable QR code (PNG), embed code, and ready-to-paste post wording (automatically including the short description + optional Scenering media credits) for YouTube / TikTok / X / Threads / Facebook / LinkedIn / Twitch & Kick / Vimeo / WhatsApp |
+| **Public hub** | A shareable page at `#/s/{slug}` with cover artwork, primary **Watch Full Video on YouTube** CTA, platform buttons, copy-link and native share |
+| **Share Kit** | Quick-copy the 4 YouTube items, downloadable QR code (scans straight to YouTube or hub), and platform-tailored social posts that play the video in YouTube |
 | **Platforms** | Connect/disconnect accounts, store default handles, see how UTMs are built |
-| **Settings** | Brand name, handle, accent colour, default UTM campaign/medium, reset to demo data |
+| **Settings** | Brand name, handle, accent colour, Google Gemini API key (SEO tags), default UTM campaign/medium, reset to demo data |
 
 Data is persisted in the browser via `localStorage` (`scenboost_data_v1`) and seeded with three demo scenes on first load, so the app is fully usable with no backend.
 
@@ -106,14 +105,13 @@ Clicks on the public hub increment the matching link's counter and appear in Ana
 
 | Route | Page |
 |---|---|
-| `#/dashboard` | Overview |
-| `#/scenes` | Scene list |
-| `#/scenes/{id}` | Scene editor |
-| `#/analytics` | Analytics |
+| `#/dashboard` | Unified Dashboard & Analytics |
+| `#/posts` | Posts list |
+| `#/posts/{id}` | Post editor |
 | `#/share` | Share Kit |
 | `#/platforms` | Connected platforms |
 | `#/settings` | Settings |
-| `#/s/{slug}` | Public hub (fan-facing) |
+| `#/s/{slug}` | Public hub |
 
 ## License
 

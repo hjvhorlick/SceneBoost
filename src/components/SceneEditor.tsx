@@ -173,7 +173,7 @@ export default function SceneEditor({
 
     setDraft((d) => {
       const shouldUpdateTitle =
-        imported.title && (!d.title.trim() || d.title === 'Untitled scene')
+        imported.title && (!d.title.trim() || d.title === 'Untitled post' || d.title === 'Untitled scene')
       const nextTitle = shouldUpdateTitle ? imported.title : d.title
       const nextSlug =
         shouldUpdateTitle && !slugTouched ? slugify(imported.title) : d.slug
@@ -444,9 +444,9 @@ export default function SceneEditor({
       <div className="page-head">
         <div>
           <button className="back-link" onClick={onBack}>
-            <ArrowLeft size={15} /> All scenes
+            <ArrowLeft size={15} /> All posts
           </button>
-          <h1>{draft.title || 'Untitled scene'}</h1>
+          <h1>{draft.title || 'Untitled post'}</h1>
           <p className="page-sub">
             Fetch from your Scenering folder → Post the 4 items to YouTube first → Fetch social posts here that play the video in YouTube.
           </p>

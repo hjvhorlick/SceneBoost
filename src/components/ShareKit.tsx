@@ -123,7 +123,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
     if (!scene || !onUpdateScene) return
     const key = loadGeminiApiKey()
     if (!key) {
-      notify('Add your Gemini API key in Settings or Scene Editor first')
+      notify('Add your Gemini API key in Settings or Post Editor first')
       if (onEditScene) onEditScene(scene.id)
       return
     }
@@ -160,8 +160,8 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
         </div>
         <EmptyState
           icon={<QrCode size={28} />}
-          title="No videos yet"
-          body="Import a Scenering folder first — then copy your 4 YouTube items and social posts here."
+          title="No posts yet"
+          body="Create a post from your Scenering folder first — then copy your 4 YouTube items and social posts here."
         />
       </div>
     )

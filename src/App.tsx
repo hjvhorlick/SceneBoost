@@ -4,7 +4,6 @@ import Sidebar, { type View } from './components/Sidebar'
 import Dashboard from './components/Dashboard'
 import Scenes from './components/Scenes'
 import SceneEditor from './components/SceneEditor'
-import Analytics from './components/Analytics'
 import ShareKit from './components/ShareKit'
 import Platforms from './components/Platforms'
 import Settings from './components/Settings'
@@ -26,10 +25,16 @@ function parseHash(): { view: View; sceneId: string | null; hubSlug: string | nu
   if (parts[0] === 's' && parts[1]) {
     return { view: 'dashboard', sceneId: null, hubSlug: parts[1] }
   }
-  if (parts[0] === 'scenes' && parts[1]) {
+  if ((parts[0] === 'posts' || parts[0] === 'scenes') && parts[1]) {
     return { view: 'editor', sceneId: parts[1], hubSlug: null }
   }
-  const valid: View[] = ['dashboard', 'scenes', 'analytics', 'share', 'platforms', 'settings']
+  if (parts[0] === 'scenes') {
+    return { view: 'posts', sceneId: null, hubSlug: null }
+  }
+  if (parts[0] === 'analytics') {
+    return { view: 'dashboard', sceneId: null, hubSlug: null }
+  }
+  const valid: View[] = ['dashboard', 'posts', 'share', 'platforms', 'settings']
   if (valid.includes(parts[0] as View)) {
     return { view: parts[0] as View, sceneId: null, hubSlug: null }
   }
@@ -69,13 +74,12 @@ export default function App() {
 
   const navigate = useCallback((view: View, sceneId?: string) => {
     if (view === 'editor' && sceneId) {
-      window.location.hash = `#/scenes/${sceneId}`
-    } else if (view === 'scenes') {
-      window.location.hash = '#/scenes'
+      window.location.hash = `#/posts/${sceneId}`
+    } else if (view === 'posts') {
+      window.location.hash = '#/posts'
     } else {
       window.location.hash = `#/${view}`
     }
-    // hashchange will update route; also set immediately for reliability
     setRoute(parseHash())
   }, [])
 
@@ -115,7 +119,7 @@ export default function App() {
   }, [data.platforms])
 
   const createScene = () => {
-    const title = newTitle.trim() || 'Untitled scene'
+    const title = newTitle.trim() || 'Untitled post'
     const slugBase = slugify(title)
     const exists = data.scenes.some((s) => s.slug === slugBase)
     const scene: Scene = {
@@ -137,7 +141,7 @@ export default function App() {
       ...d,
       scenes: [scene, ...d.scenes],
       activity: [
-        { id: uid(), text: `New scene created: “${title}”`, time: new Date().toISOString(), kind: 'scene' as const },
+        { id: uid(), text: `New post created: “${title}”`, time: new Date().toISOString(), kind: 'scene' as const },
         ...d.activity,
       ].slice(0, 20),
     }))
@@ -145,14 +149,14 @@ export default function App() {
     setNewTitle('')
     setNewThumbDataUrl('')
     setNewThumbName('')
-    notify('Video created — Step 1: check SEO tags & thumbnail, then upload to YouTube!')
+    notify('Post created — prepare your 4 YouTube items first!')
     navigate('editor', scene.id)
   }
 
   const createSceneFromScenering = async (files: FileList | null) => {
     if (!files || files.length === 0) return
     const imported = await parseSceneringFiles(files)
-    const title = (newTitle.trim() || imported.title || 'Untitled scene').trim()
+    const title = (newTitle.trim() || imported.title || 'Untitled post').trim()
     const slugBase = slugify(title)
     const exists = data.scenes.some((s) => s.slug === slugBase)
     const hasThumb = Boolean(newThumbDataUrl || imported.thumbnailFoundInFolder)
@@ -179,7 +183,7 @@ export default function App() {
       ...d,
       scenes: [scene, ...d.scenes],
       activity: [
-        { id: uid(), text: `Scene imported from Scenering: “${title}”`, time: new Date().toISOString(), kind: 'scene' as const },
+        { id: uid(), text: `Post imported from Scenering: “${title}”`, time: new Date().toISOString(), kind: 'scene' as const },
         ...d.activity,
       ].slice(0, 20),
     }))
@@ -211,13 +215,13 @@ export default function App() {
       ...d,
       scenes: d.scenes.filter((s) => s.id !== id),
       activity: [
-        { id: uid(), text: `Scene deleted: “${target?.title ?? id}”`, time: new Date().toISOString(), kind: 'system' as const },
+        { id: uid(), text: `Post deleted: “${target?.title ?? id}”`, time: new Date().toISOString(), kind: 'system' as const },
         ...d.activity,
       ].slice(0, 20),
     }))
     setDeleteTarget(null)
-    notify('Scene deleted')
-    if (route.view === 'editor') navigate('scenes')
+    notify('Post deleted')
+    if (route.view === 'editor') navigate('posts')
   }
 
   const toggleStatus = (id: string) => {
@@ -229,7 +233,7 @@ export default function App() {
           : s
       ),
     }))
-    notify('Scene status updated')
+    notify('Post status updated')
   }
 
   const trackClick = useCallback((sceneId: string, linkId: string) => {
@@ -248,7 +252,7 @@ export default function App() {
           ? [
               {
                 id: uid(),
-                text: `${link.platform} link for “${scene?.title ?? 'scene'}” clicked`,
+                text: `${link.platform} link for “${scene?.title ?? 'post'}” clicked`,
                 time: new Date().toISOString(),
                 kind: 'click' as const,
               },
@@ -299,10 +303,10 @@ export default function App() {
             </button>
           </div>
           <div className="hub-wrap center-wrap">
-            <h1>Scene not found</h1>
-            <p className="muted">This hub link doesn’t match any scene. Check the slug or create the scene in the app.</p>
-            <button className="btn btn-accent" onClick={() => navigate('scenes')}>
-              Go to Scenes
+            <h1>Post not found</h1>
+            <p className="muted">This hub link doesn’t match any post. Check the slug or create the post in the app.</p>
+            <button className="btn btn-accent" onClick={() => navigate('posts')}>
+              Go to Posts
             </button>
           </div>
         </div>
@@ -327,7 +331,7 @@ export default function App() {
       <Sidebar
         view={route.view}
         onNavigate={(v) => navigate(v)}
-        sceneCount={data.scenes.length}
+        postCount={data.scenes.length}
         liveCount={data.scenes.filter((s) => s.status === 'live').length}
       />
 
@@ -340,7 +344,7 @@ export default function App() {
           />
         )}
 
-        {route.view === 'scenes' && (
+        {route.view === 'posts' && (
           <Scenes
             data={data}
             onCreate={() => setShowCreate(true)}
@@ -356,7 +360,7 @@ export default function App() {
             <SceneEditor
               scene={editorScene}
               data={data}
-              onBack={() => navigate('scenes')}
+              onBack={() => navigate('posts')}
               onSave={saveScene}
               onDelete={(id) => setDeleteTarget(data.scenes.find((s) => s.id === id) ?? null)}
               onOpenHub={openHub}
@@ -364,15 +368,13 @@ export default function App() {
             />
           ) : (
             <div className="page">
-              <h1>Scene not found</h1>
-              <p className="muted">It may have been deleted. Head back to Scenes to pick another.</p>
-              <button className="btn btn-accent" onClick={() => navigate('scenes')}>
-                Back to Scenes
+              <h1>Post not found</h1>
+              <p className="muted">It may have been deleted. Head back to Posts to pick another.</p>
+              <button className="btn btn-accent" onClick={() => navigate('posts')}>
+                Back to Posts
               </button>
             </div>
           ))}
-
-        {route.view === 'analytics' && <Analytics data={data} />}
 
         {route.view === 'share' && (
           <ShareKit
@@ -397,7 +399,7 @@ export default function App() {
         )}
       </main>
 
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New YouTube-First Video Boost">
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create a new post">
         <p className="muted" style={{ marginBottom: 14 }}>
           Import your Scenering saved folder (reads title, credit page, SEO ranking tags &amp; thumbnail automatically), then post to YouTube first and boost from every social platform.
         </p>
@@ -497,14 +499,14 @@ export default function App() {
         </div>
       </Modal>
 
-      <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete scene?">
+      <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete post?">
         <p>
           Delete <strong>“{deleteTarget?.title}”</strong> and its {deleteTarget?.links.length ?? 0} platform links?
           This cannot be undone.
         </p>
         <div className="btn-row" style={{ marginTop: 16 }}>
           <button className="btn btn-danger" onClick={() => deleteTarget && deleteScene(deleteTarget.id)}>
-            Delete scene
+            Delete post
           </button>
           <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)}>
             Keep it

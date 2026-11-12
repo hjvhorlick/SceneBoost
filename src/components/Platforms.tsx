@@ -19,7 +19,7 @@ export default function Platforms({ data, onToggle, onHandle, notify }: Props) {
         <div>
           <h1>Platforms</h1>
           <p className="page-sub">
-            Connect the social and video accounts you publish to. Connected platforms appear first in the scene editor.
+            Connect the social and video accounts you publish to. Connected platforms appear first in the post editor.
           </p>
         </div>
         <div className="page-actions">
@@ -105,7 +105,7 @@ export default function Platforms({ data, onToggle, onHandle, notify }: Props) {
           </div>
           <div>
             <strong>utm_content</strong>
-            <p className="muted">The scene slug — so you can compare scenes inside any analytics tool.</p>
+            <p className="muted">The post slug — so you can compare posts inside any analytics tool.</p>
           </div>
         </div>
         <p className="muted small" style={{ marginTop: 12 }}>

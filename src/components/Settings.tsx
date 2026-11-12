@@ -104,7 +104,7 @@ export default function Settings({ data, onSave, onReset, notify }: Props) {
           <div className="utm-preview">
             <span className="muted small">Example tracked URL</span>
             <code>
-              https://youtube.com/watch?v=…?utm_source=youtube&amp;utm_medium={draft.defaultMedium || 'social'}&amp;utm_campaign={draft.defaultCampaign || 'campaign'}&amp;utm_content=your-scene-slug
+              https://youtube.com/watch?v=…?utm_source=youtube&amp;utm_medium={draft.defaultMedium || 'social'}&amp;utm_campaign={draft.defaultCampaign || 'campaign'}&amp;utm_content=your-post-slug
             </code>
           </div>
         </div>
@@ -143,7 +143,7 @@ export default function Settings({ data, onSave, onReset, notify }: Props) {
         <div className="card-head">
           <div>
             <h3>Data</h3>
-            <p>Your scenes, links and clicks live in this browser (localStorage).</p>
+            <p>Your posts, links and clicks live in this browser (localStorage).</p>
           </div>
         </div>
         {!confirmReset ? (

@@ -124,7 +124,7 @@ function seed(): AppData {
     totalClicks: 13637,
     activity: [
       { id: uid(), text: 'YouTube link for “Neon Nights” passed 4,800 clicks', time: iso(0, 2), kind: 'click' },
-      { id: uid(), text: 'New scene created: “Summer Drop — Teaser Campaign”', time: iso(1), kind: 'scene' },
+      { id: uid(), text: 'New post created: “Summer Drop — Teaser Campaign”', time: iso(1), kind: 'scene' },
       { id: uid(), text: 'TikTok link added to “Studio Sessions — Ep. 04”', time: iso(1, 6), kind: 'link' },
       { id: uid(), text: 'TikTok link for “Neon Nights” passed 3,100 clicks', time: iso(2), kind: 'click' },
     ],
@@ -204,11 +204,18 @@ function migrateDemoProfiles(data: AppData): AppData {
       }),
   }))
 
-  const activity = (data.activity ?? []).map((item) =>
-    item.text === 'Spotify link for “Neon Nights” passed 1,800 clicks'
-      ? { ...item, text: 'TikTok link for “Neon Nights” passed 3,100 clicks' }
-      : item
-  )
+  const activity = (data.activity ?? []).map((item) => {
+    if (item.text === 'Spotify link for “Neon Nights” passed 1,800 clicks') {
+      return { ...item, text: 'TikTok link for “Neon Nights” passed 3,100 clicks' }
+    }
+    if (item.text.startsWith('New scene created:')) {
+      return { ...item, text: item.text.replace(/^New scene created:/, 'New post created:') }
+    }
+    if (item.text.startsWith('Scene imported from Scenering:')) {
+      return { ...item, text: item.text.replace(/^Scene imported from Scenering:/, 'Post imported from Scenering:') }
+    }
+    return item
+  })
 
   return { ...data, platforms, scenes, activity }
 }

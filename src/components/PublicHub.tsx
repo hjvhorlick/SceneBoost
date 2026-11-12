@@ -90,13 +90,13 @@ export default function PublicHub({ scene, defaultMedium, defaultCampaign, brand
         <div className="hub-body">
           {scene.status !== 'live' && (
             <div className="hub-notice">
-              This scene is <strong>{scene.status}</strong> — fans will see this page, but you may want to go live
+              This post is <strong>{scene.status}</strong> — viewers will see this page, but you may want to go live
               before sharing it widely.
             </div>
           )}
 
           {enabled.length === 0 ? (
-            <p className="muted center">No active platform links yet. Add links in the scene editor.</p>
+            <p className="muted center">No active platform links yet. Add links in the post editor.</p>
           ) : (
             <div className="hub-links">
               {enabled.map((link) => {
