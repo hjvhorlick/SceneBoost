@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Plus, Search, Clapperboard, Trash2, ExternalLink, Pause, Play, Pencil } from 'lucide-react'
 import type { AppData, Scene } from '../types'
 import { formatNumber, sceneClicks, timeAgo } from '../lib/utils'
-import { GRADIENTS, platformById } from '../lib/platforms'
+import { coverStyle, platformById } from '../lib/platforms'
 import { Badge, EmptyState, PlatformPill } from './ui'
 
 interface Props {
@@ -29,11 +29,13 @@ export default function Scenes({ data, onCreate, onEdit, onDelete, onToggleStatu
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>Scenes</h1>
-          <p className="page-sub">Each scene is a video, drop or campaign with its own hub link and platform links.</p>
+          <h1>Posts</h1>
+          <p className="page-sub">
+            Each post holds your 4 YouTube upload items and platform-ready social posts that play the video in YouTube.
+          </p>
         </div>
         <button className="btn btn-accent" onClick={onCreate}>
-          <Plus size={16} /> New scene
+          <Plus size={16} /> New post
         </button>
       </div>
 
@@ -41,7 +43,7 @@ export default function Scenes({ data, onCreate, onEdit, onDelete, onToggleStatu
         <div className="search-box">
           <Search size={16} />
           <input
-            placeholder="Search scenes by title or slug…"
+            placeholder="Search posts by title or slug…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -58,16 +60,16 @@ export default function Scenes({ data, onCreate, onEdit, onDelete, onToggleStatu
       {filtered.length === 0 ? (
         <EmptyState
           icon={<Clapperboard size={28} />}
-          title={data.scenes.length === 0 ? 'No scenes yet' : 'No scenes match your search'}
+          title={data.scenes.length === 0 ? 'No posts yet' : 'No posts match your search'}
           body={
             data.scenes.length === 0
-              ? 'Create your first scene — add a title, drop in your video link and connect every platform.'
+              ? 'Create your first post — fetch your Scenering folder, upload the 4 items to YouTube, and share across your social channels.'
               : 'Try a different search term or filter.'
           }
           action={
             data.scenes.length === 0 ? (
               <button className="btn btn-accent" onClick={onCreate}>
-                <Plus size={16} /> Create a scene
+                <Plus size={16} /> Create a post
               </button>
             ) : undefined
           }
@@ -107,7 +109,7 @@ function SceneCard({
   const enabledLinks = scene.links.filter((l) => l.enabled)
   return (
     <article className="scene-card">
-      <div className="scene-thumb" style={{ background: GRADIENTS[scene.thumbnail] ?? GRADIENTS.mono }}>
+      <div className="scene-thumb" style={coverStyle(scene.thumbnail, 'card')}>
         <div className="scene-thumb-overlay">
           <span className="scene-play">
             <Clapperboard size={20} />
@@ -151,7 +153,7 @@ function SceneCard({
         <button className="btn btn-ghost btn-sm" onClick={onToggleStatus} title={scene.status === 'live' ? 'Pause' : 'Go live'}>
           {scene.status === 'live' ? <Pause size={13} /> : <Play size={13} />}
         </button>
-        <button className="btn btn-danger btn-sm" onClick={onDelete} title="Delete scene">
+        <button className="btn btn-danger btn-sm" onClick={onDelete} title="Delete post">
           <Trash2 size={13} />
         </button>
       </div>

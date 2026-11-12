@@ -1,17 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FolderOpen, FileText, ImagePlus } from 'lucide-react'
 import Sidebar, { type View } from './components/Sidebar'
 import Dashboard from './components/Dashboard'
 import Scenes from './components/Scenes'
 import SceneEditor from './components/SceneEditor'
-import Analytics from './components/Analytics'
 import ShareKit from './components/ShareKit'
 import Platforms from './components/Platforms'
 import Settings from './components/Settings'
 import PublicHub from './components/PublicHub'
 import { Modal, Toast } from './components/ui'
+import {
+  generateYoutubeRankingTags,
+  parseSceneringFiles,
+  renderImageFileToYoutubeThumbnail,
+} from './lib/scenering'
 import { loadData, saveData, resetData } from './lib/store'
 import { slugify, uid } from './lib/utils'
-import type { AppData, PlatformId, Scene } from './types'
+import type { AppData, PlatformId, Scene, SceneLink } from './types'
 
 function parseHash(): { view: View; sceneId: string | null; hubSlug: string | null } {
   const hash = window.location.hash.replace(/^#\/?/, '')
@@ -20,10 +25,16 @@ function parseHash(): { view: View; sceneId: string | null; hubSlug: string | nu
   if (parts[0] === 's' && parts[1]) {
     return { view: 'dashboard', sceneId: null, hubSlug: parts[1] }
   }
-  if (parts[0] === 'scenes' && parts[1]) {
+  if ((parts[0] === 'posts' || parts[0] === 'scenes') && parts[1]) {
     return { view: 'editor', sceneId: parts[1], hubSlug: null }
   }
-  const valid: View[] = ['dashboard', 'scenes', 'analytics', 'share', 'platforms', 'settings']
+  if (parts[0] === 'scenes') {
+    return { view: 'posts', sceneId: null, hubSlug: null }
+  }
+  if (parts[0] === 'analytics') {
+    return { view: 'dashboard', sceneId: null, hubSlug: null }
+  }
+  const valid: View[] = ['dashboard', 'posts', 'share', 'platforms', 'settings']
   if (valid.includes(parts[0] as View)) {
     return { view: parts[0] as View, sceneId: null, hubSlug: null }
   }
@@ -36,7 +47,13 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [newTitle, setNewTitle] = useState('')
+  const [newThumbDataUrl, setNewThumbDataUrl] = useState('')
+  const [newThumbName, setNewThumbName] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Scene | null>(null)
+  const createFolderRef = useRef<HTMLInputElement | null>(null)
+  const createFileRef = useRef<HTMLInputElement | null>(null)
+  const createThumbRef = useRef<HTMLInputElement | null>(null)
+  const videoFilesByPostRef = useRef<Map<string, File>>(new Map())
 
   useEffect(() => {
     saveData(data)
@@ -58,13 +75,12 @@ export default function App() {
 
   const navigate = useCallback((view: View, sceneId?: string) => {
     if (view === 'editor' && sceneId) {
-      window.location.hash = `#/scenes/${sceneId}`
-    } else if (view === 'scenes') {
-      window.location.hash = '#/scenes'
+      window.location.hash = `#/posts/${sceneId}`
+    } else if (view === 'posts') {
+      window.location.hash = '#/posts'
     } else {
       window.location.hash = `#/${view}`
     }
-    // hashchange will update route; also set immediately for reliability
     setRoute(parseHash())
   }, [])
 
@@ -73,8 +89,38 @@ export default function App() {
     setRoute(parseHash())
   }, [])
 
+  const buildInitialSceneLinks = useCallback((): SceneLink[] => {
+    const ytUrl =
+      data.platforms.find((p) => p.id === 'youtube')?.defaultHandle?.trim() ||
+      'https://www.youtube.com/channel/UCV9v30xQPdbhwM5lAZC2MRQ'
+    const webPlatform = data.platforms.find((p) => p.id === 'website')
+    const links: SceneLink[] = [
+      {
+        id: uid(),
+        platform: 'youtube',
+        label: 'Watch Full Video on YouTube',
+        url: ytUrl,
+        enabled: true,
+        clicks: 0,
+        order: 0,
+      },
+    ]
+    if (webPlatform?.connected && webPlatform.defaultHandle.trim()) {
+      links.push({
+        id: uid(),
+        platform: 'website',
+        label: 'Visit Scenering',
+        url: webPlatform.defaultHandle.trim(),
+        enabled: true,
+        clicks: 0,
+        order: 1,
+      })
+    }
+    return links
+  }, [data.platforms])
+
   const createScene = () => {
-    const title = newTitle.trim() || 'Untitled scene'
+    const title = newTitle.trim() || 'Untitled post'
     const slugBase = slugify(title)
     const exists = data.scenes.some((s) => s.slug === slugBase)
     const scene: Scene = {
@@ -82,25 +128,79 @@ export default function App() {
       title,
       slug: exists ? `${slugBase}-${uid().slice(0, 4)}` : slugBase,
       description: '',
-      thumbnail: 'neon',
+      tags: generateYoutubeRankingTags({ title }),
+      thumbnail: newThumbDataUrl || 'neon',
+      thumbnailFileName: newThumbName || undefined,
       videoUrl: '',
       status: 'draft',
       accent: data.settings.accent,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      links: [],
+      links: buildInitialSceneLinks(),
     }
     setData((d) => ({
       ...d,
       scenes: [scene, ...d.scenes],
       activity: [
-        { id: uid(), text: `New scene created: “${title}”`, time: new Date().toISOString(), kind: 'scene' as const },
+        { id: uid(), text: `New post created: “${title}”`, time: new Date().toISOString(), kind: 'scene' as const },
         ...d.activity,
       ].slice(0, 20),
     }))
     setShowCreate(false)
     setNewTitle('')
-    notify('Scene created — add your platform links')
+    setNewThumbDataUrl('')
+    setNewThumbName('')
+    notify('Post created — prepare your 4 YouTube items first!')
+    navigate('editor', scene.id)
+  }
+
+  const createSceneFromScenering = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const imported = await parseSceneringFiles(files)
+    const title = (newTitle.trim() || imported.title || 'Untitled post').trim()
+    const slugBase = slugify(title)
+    const exists = data.scenes.some((s) => s.slug === slugBase)
+    const hasThumb = Boolean(newThumbDataUrl || imported.thumbnailFoundInFolder)
+    const sceneId = uid()
+    if (imported.videoFile) {
+      videoFilesByPostRef.current.set(sceneId, imported.videoFile)
+    }
+    const scene: Scene = {
+      id: sceneId,
+      title,
+      slug: exists ? `${slugBase}-${uid().slice(0, 4)}` : slugBase,
+      description: imported.shortDescription || '',
+      tags: imported.tags,
+      credits: imported.credits || undefined,
+      videoFileName: imported.videoFileName || undefined,
+      videoSizeBytes: imported.videoSizeBytes || undefined,
+      thumbnail: newThumbDataUrl || imported.thumbnailDataUrl || 'neon',
+      thumbnailFileName: newThumbName || imported.thumbnailFileName || undefined,
+      thumbnailMissing: !hasThumb,
+      videoUrl: '',
+      status: 'draft',
+      accent: data.settings.accent,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      links: buildInitialSceneLinks(),
+    }
+    setData((d) => ({
+      ...d,
+      scenes: [scene, ...d.scenes],
+      activity: [
+        { id: uid(), text: `Post imported from Scenering: “${title}”`, time: new Date().toISOString(), kind: 'scene' as const },
+        ...d.activity,
+      ].slice(0, 20),
+    }))
+    setShowCreate(false)
+    setNewTitle('')
+    setNewThumbDataUrl('')
+    setNewThumbName('')
+    notify(
+      hasThumb
+        ? 'Fetched video, credits, top description & thumbnail ✓'
+        : 'Fetched video & credits — upload a thumbnail in Item 3'
+    )
     navigate('editor', scene.id)
   }
 
@@ -120,13 +220,13 @@ export default function App() {
       ...d,
       scenes: d.scenes.filter((s) => s.id !== id),
       activity: [
-        { id: uid(), text: `Scene deleted: “${target?.title ?? id}”`, time: new Date().toISOString(), kind: 'system' as const },
+        { id: uid(), text: `Post deleted: “${target?.title ?? id}”`, time: new Date().toISOString(), kind: 'system' as const },
         ...d.activity,
       ].slice(0, 20),
     }))
     setDeleteTarget(null)
-    notify('Scene deleted')
-    if (route.view === 'editor') navigate('scenes')
+    notify('Post deleted')
+    if (route.view === 'editor') navigate('posts')
   }
 
   const toggleStatus = (id: string) => {
@@ -138,7 +238,7 @@ export default function App() {
           : s
       ),
     }))
-    notify('Scene status updated')
+    notify('Post status updated')
   }
 
   const trackClick = useCallback((sceneId: string, linkId: string) => {
@@ -157,7 +257,7 @@ export default function App() {
           ? [
               {
                 id: uid(),
-                text: `${link.platform} link for “${scene?.title ?? 'scene'}” clicked`,
+                text: `${link.platform} link for “${scene?.title ?? 'post'}” clicked`,
                 time: new Date().toISOString(),
                 kind: 'click' as const,
               },
@@ -169,17 +269,27 @@ export default function App() {
   }, [])
 
   const togglePlatform = (id: PlatformId) => {
-    setData((d) => ({
-      ...d,
-      platforms: d.platforms.map((p) => (p.id === id ? { ...p, connected: !p.connected } : p)),
-    }))
+    setData((d) => {
+      const exists = d.platforms.some((p) => p.id === id)
+      return {
+        ...d,
+        platforms: exists
+          ? d.platforms.map((p) => (p.id === id ? { ...p, connected: !p.connected } : p))
+          : [...d.platforms, { id, connected: true, defaultHandle: '' }],
+      }
+    })
   }
 
   const setPlatformHandle = (id: PlatformId, handle: string) => {
-    setData((d) => ({
-      ...d,
-      platforms: d.platforms.map((p) => (p.id === id ? { ...p, defaultHandle: handle } : p)),
-    }))
+    setData((d) => {
+      const exists = d.platforms.some((p) => p.id === id)
+      return {
+        ...d,
+        platforms: exists
+          ? d.platforms.map((p) => (p.id === id ? { ...p, defaultHandle: handle } : p))
+          : [...d.platforms, { id, connected: true, defaultHandle: handle }],
+      }
+    })
   }
 
   // Public hub route takes over the whole screen
@@ -198,10 +308,10 @@ export default function App() {
             </button>
           </div>
           <div className="hub-wrap center-wrap">
-            <h1>Scene not found</h1>
-            <p className="muted">This hub link doesn’t match any scene. Check the slug or create the scene in the app.</p>
-            <button className="btn btn-accent" onClick={() => navigate('scenes')}>
-              Go to Scenes
+            <h1>Post not found</h1>
+            <p className="muted">This hub link doesn’t match any post. Check the slug or create the post in the app.</p>
+            <button className="btn btn-accent" onClick={() => navigate('posts')}>
+              Go to Posts
             </button>
           </div>
         </div>
@@ -226,7 +336,7 @@ export default function App() {
       <Sidebar
         view={route.view}
         onNavigate={(v) => navigate(v)}
-        sceneCount={data.scenes.length}
+        postCount={data.scenes.length}
         liveCount={data.scenes.filter((s) => s.status === 'live').length}
       />
 
@@ -239,7 +349,7 @@ export default function App() {
           />
         )}
 
-        {route.view === 'scenes' && (
+        {route.view === 'posts' && (
           <Scenes
             data={data}
             onCreate={() => setShowCreate(true)}
@@ -254,8 +364,12 @@ export default function App() {
           (editorScene ? (
             <SceneEditor
               scene={editorScene}
+              initialVideoFile={videoFilesByPostRef.current.get(editorScene.id) ?? null}
+              onRememberVideoFile={(postId, file) => {
+                videoFilesByPostRef.current.set(postId, file)
+              }}
               data={data}
-              onBack={() => navigate('scenes')}
+              onBack={() => navigate('posts')}
               onSave={saveScene}
               onDelete={(id) => setDeleteTarget(data.scenes.find((s) => s.id === id) ?? null)}
               onOpenHub={openHub}
@@ -263,17 +377,22 @@ export default function App() {
             />
           ) : (
             <div className="page">
-              <h1>Scene not found</h1>
-              <p className="muted">It may have been deleted. Head back to Scenes to pick another.</p>
-              <button className="btn btn-accent" onClick={() => navigate('scenes')}>
-                Back to Scenes
+              <h1>Post not found</h1>
+              <p className="muted">It may have been deleted. Head back to Posts to pick another.</p>
+              <button className="btn btn-accent" onClick={() => navigate('posts')}>
+                Back to Posts
               </button>
             </div>
           ))}
 
-        {route.view === 'analytics' && <Analytics data={data} />}
-
-        {route.view === 'share' && <ShareKit data={data} notify={notify} />}
+        {route.view === 'share' && (
+          <ShareKit
+            data={data}
+            onEditScene={(id) => navigate('editor', id)}
+            onUpdateScene={saveScene}
+            notify={notify}
+          />
+        )}
 
         {route.view === 'platforms' && (
           <Platforms data={data} onToggle={togglePlatform} onHandle={setPlatformHandle} notify={notify} />
@@ -289,24 +408,99 @@ export default function App() {
         )}
       </main>
 
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create a new scene">
-        <p className="muted" style={{ marginBottom: 16 }}>
-          A scene is a video, drop or campaign. You’ll add platform links next.
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create a new post">
+        <p className="muted" style={{ marginBottom: 14 }}>
+          Import your Scenering saved folder (reads title, credit page, SEO ranking tags &amp; thumbnail automatically), then post to YouTube first and boost from every social platform.
         </p>
+        <div className="scenering-import-bar" style={{ marginBottom: 14 }}>
+          <div>
+            <strong>1. Import Scenering folder &amp; credit page</strong>
+            <p className="muted small">Auto-extracts description, credits, SEO tags &amp; 1280×720 thumbnail</p>
+          </div>
+          <div className="btn-row">
+            <input
+              ref={createFolderRef}
+              type="file"
+              multiple
+              style={{ display: 'none' }}
+              {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+              onChange={(e) => {
+                void createSceneFromScenering(e.target.files)
+                e.target.value = ''
+              }}
+            />
+            <input
+              ref={createFileRef}
+              type="file"
+              accept=".txt,.json,.md"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                void createSceneFromScenering(e.target.files)
+                e.target.value = ''
+              }}
+            />
+            <input
+              ref={createThumbRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (!file) return
+                try {
+                  const dataUrl = await renderImageFileToYoutubeThumbnail(file)
+                  setNewThumbDataUrl(dataUrl)
+                  setNewThumbName(file.name)
+                  notify(`Thumbnail ready: ${file.name} ✓`)
+                } catch {
+                  notify('Could not read thumbnail image')
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-accent btn-sm"
+              onClick={() => createFolderRef.current?.click()}
+            >
+              <FolderOpen size={14} /> Select folder
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => createFileRef.current?.click()}
+            >
+              <FileText size={14} /> Credits (.txt)
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => createThumbRef.current?.click()}
+            >
+              <ImagePlus size={14} /> {newThumbName ? 'Thumbnail ✓' : 'Thumbnail'}
+            </button>
+          </div>
+        </div>
+        {newThumbName && (
+          <p className="small" style={{ marginBottom: 10, color: 'var(--accent)' }}>
+            🖼️ Imported 1280×720 thumbnail: <code>{newThumbName}</code>
+          </p>
+        )}
         <label className="field">
-          <span>Scene title</span>
+          <span>Or enter video title manually</span>
           <input
             autoFocus
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && createScene()}
-            placeholder="e.g. Neon Nights — Official Video"
+            placeholder="e.g. How Ancient Rome Built an Unstoppable Empire"
           />
-          {newTitle.trim() && <span className="field-hint">Hub URL will be /s/{slugify(newTitle)}</span>}
+          {newTitle.trim() && <span className="field-hint">Slug: /s/{slugify(newTitle)}</span>}
         </label>
         <div className="btn-row" style={{ marginTop: 16 }}>
           <button className="btn btn-accent" onClick={createScene}>
-            Create scene
+            Continue to YouTube SEO Pack
           </button>
           <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>
             Cancel
@@ -314,14 +508,14 @@ export default function App() {
         </div>
       </Modal>
 
-      <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete scene?">
+      <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete post?">
         <p>
           Delete <strong>“{deleteTarget?.title}”</strong> and its {deleteTarget?.links.length ?? 0} platform links?
           This cannot be undone.
         </p>
         <div className="btn-row" style={{ marginTop: 16 }}>
           <button className="btn btn-danger" onClick={() => deleteTarget && deleteScene(deleteTarget.id)}>
-            Delete scene
+            Delete post
           </button>
           <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)}>
             Keep it

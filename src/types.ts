@@ -1,11 +1,14 @@
 export type PlatformId =
   | 'youtube'
   | 'tiktok'
-  | 'instagram'
   | 'facebook'
-  | 'x'
   | 'linkedin'
-  | 'spotify'
+  | 'x'
+  | 'twitch'
+  | 'kick'
+  | 'vimeo'
+  | 'threads'
+  | 'instagram'
   | 'website'
 
 export type SceneStatus = 'live' | 'draft' | 'paused'
@@ -25,8 +28,16 @@ export interface Scene {
   title: string
   slug: string
   description: string
-  thumbnail: string // gradient key or image url
-  videoUrl: string
+  tags?: string[] // SEO-friendly YouTube tags (comma-separated <= 500 chars)
+  credits?: string // media attribution block fetched from Scenering credits file
+  videoFileName?: string // rendered video file fetched in Scenering folder
+  videoSizeBytes?: number // size of video file fetched in folder
+  thumbnailFileName?: string // thumbnail file fetched in folder or uploaded
+  thumbnailMissing?: boolean // true when folder import found no thumbnail image yet
+  thumbnail: string // Scenering cover preset key or imported 1280x720 image data URL
+  videoUrl: string // Automatically fetched YouTube video URL (plays the video in YouTube)
+  youtubeVideoTitle?: string // Exact video title returned from YouTube when auto-fetched
+  youtubeFetchedAt?: string // ISO timestamp when SceneBoost fetched the link from YouTube
   status: SceneStatus
   accent: string // hex
   createdAt: string

@@ -1,94 +1,199 @@
-import { MousePointerClick, Clapperboard, Link2, Plug2, ArrowRight, TrendingUp, Plus } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import {
+  MousePointerClick,
+  Clapperboard,
+  Link2,
+  Plug2,
+  ArrowRight,
+  TrendingUp,
+  Plus,
+  Download,
+} from 'lucide-react'
 import type { AppData } from '../types'
-import { formatNumber, sceneClicks, timeAgo } from '../lib/utils'
-import { platformById, GRADIENTS } from '../lib/platforms'
+import { downloadText, formatNumber, sceneClicks, timeAgo } from '../lib/utils'
+import { coverStyle, platformById } from '../lib/platforms'
 import { StatCard, Badge, PlatformPill } from './ui'
 
 interface Props {
   data: AppData
-  onNavigate: (v: 'scenes' | 'analytics' | 'share' | 'editor', id?: string) => void
+  onNavigate: (v: 'posts' | 'share' | 'editor', id?: string) => void
   onCreate: () => void
 }
 
 export default function Dashboard({ data, onNavigate, onCreate }: Props) {
-  const totalClicks = data.scenes.reduce((s, sc) => s + sceneClicks(sc), 0)
-  const liveCount = data.scenes.filter((s) => s.status === 'live').length
-  const totalLinks = data.scenes.reduce((s, sc) => s + sc.links.filter((l) => l.enabled).length, 0)
+  const [postFilter, setPostFilter] = useState<string>('all')
+
+  const scopedPosts = useMemo(
+    () =>
+      postFilter === 'all'
+        ? data.scenes
+        : data.scenes.filter((p) => p.id === postFilter),
+    [data.scenes, postFilter]
+  )
+
+  const totalClicks = scopedPosts.reduce((s, p) => s + sceneClicks(p), 0)
+  const liveCount = scopedPosts.filter((p) => p.status === 'live').length
+  const totalLinks = scopedPosts.reduce((s, p) => s + p.links.filter((l) => l.enabled).length, 0)
   const connected = data.platforms.filter((p) => p.connected).length
 
-  const sorted = [...data.scenes].sort((a, b) => sceneClicks(b) - sceneClicks(a))
-  const maxClicks = Math.max(1, ...sorted.map(sceneClicks))
+  const sortedPosts = [...scopedPosts].sort((a, b) => sceneClicks(b) - sceneClicks(a))
+  const maxPostClicks = Math.max(1, ...sortedPosts.map(sceneClicks))
 
-  // platform totals
-  const platformTotals = new Map<string, number>()
-  data.scenes.forEach((sc) =>
-    sc.links.forEach((l) => {
-      platformTotals.set(l.platform, (platformTotals.get(l.platform) ?? 0) + l.clicks)
-    })
-  )
-  const platformRows = [...platformTotals.entries()]
-    .map(([id, clicks]) => ({ def: platformById(id as never), clicks }))
-    .sort((a, b) => b.clicks - a.clicks)
+  const platformRows = useMemo(() => {
+    const map = new Map<string, number>()
+    scopedPosts.forEach((p) =>
+      p.links.forEach((l) => {
+        map.set(l.platform, (map.get(l.platform) ?? 0) + l.clicks)
+      })
+    )
+    return [...map.entries()]
+      .map(([id, clicks]) => ({ def: platformById(id as never), clicks }))
+      .sort((a, b) => b.clicks - a.clicks)
+  }, [scopedPosts])
+
   const maxPlatform = Math.max(1, ...platformRows.map((r) => r.clicks))
+
+  const linkRows = useMemo(() => {
+    const rows: {
+      postId: string
+      postTitle: string
+      slug: string
+      platform: string
+      label: string
+      url: string
+      clicks: number
+    }[] = []
+    scopedPosts.forEach((p) =>
+      p.links.forEach((l) =>
+        rows.push({
+          postId: p.id,
+          postTitle: p.title,
+          slug: p.slug,
+          platform: l.platform,
+          label: l.label,
+          url: l.url,
+          clicks: l.clicks,
+        })
+      )
+    )
+    return rows.sort((a, b) => b.clicks - a.clicks)
+  }, [scopedPosts])
+
+  const exportCsv = () => {
+    const header = 'post,slug,platform,label,url,clicks\n'
+    const body = linkRows
+      .map((r) =>
+        [r.postTitle, r.slug, r.platform, r.label, r.url, r.clicks]
+          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+          .join(',')
+      )
+      .join('\n')
+    downloadText('sceneboost-post-analytics.csv', header + body, 'text/csv')
+  }
 
   return (
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>Good to see you back 👋</h1>
+          <h1>Dashboard</h1>
           <p className="page-sub">
-            {data.settings.brandName} · {data.settings.handle} — here’s how your scenes are travelling across platforms.
+            {data.settings.brandName} · {data.settings.handle} — overview and click analytics across all your posts and platforms.
           </p>
         </div>
         <div className="page-actions">
-          <button className="btn btn-ghost" onClick={() => onNavigate('analytics')}>
-            View analytics <ArrowRight size={15} />
-          </button>
+          {data.scenes.length > 0 && (
+            <>
+              <select
+                value={postFilter}
+                onChange={(e) => setPostFilter(e.target.value)}
+                className="select"
+              >
+                <option value="all">All posts</option>
+                {data.scenes.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.title}
+                  </option>
+                ))}
+              </select>
+              <button className="btn btn-ghost" onClick={exportCsv}>
+                <Download size={15} /> Export CSV
+              </button>
+            </>
+          )}
           <button className="btn btn-accent" onClick={onCreate}>
-            <Plus size={16} /> New scene
+            <Plus size={16} /> New post
           </button>
         </div>
       </div>
 
       <div className="stats-grid">
-        <StatCard label="Total clicks" value={formatNumber(totalClicks)} sub="Across all scenes & platforms" icon={<MousePointerClick size={18} />} />
-        <StatCard label="Scenes" value={String(data.scenes.length)} sub={`${liveCount} live · ${data.scenes.length - liveCount} not live`} icon={<Clapperboard size={18} />} />
-        <StatCard label="Active links" value={String(totalLinks)} sub="Enabled platform links" icon={<Link2 size={18} />} />
-        <StatCard label="Platforms connected" value={`${connected} / ${data.platforms.length}`} sub="Social + video accounts" icon={<Plug2 size={18} />} />
+        <StatCard
+          label="Total clicks"
+          value={formatNumber(totalClicks)}
+          sub={postFilter === 'all' ? 'Across all posts & platforms' : 'Selected post'}
+          icon={<MousePointerClick size={18} />}
+        />
+        <StatCard
+          label="Posts"
+          value={String(scopedPosts.length)}
+          sub={`${liveCount} live · ${scopedPosts.length - liveCount} draft/paused`}
+          icon={<Clapperboard size={18} />}
+        />
+        <StatCard
+          label="Active links"
+          value={String(totalLinks)}
+          sub="Enabled platform links"
+          icon={<Link2 size={18} />}
+        />
+        <StatCard
+          label="Platforms connected"
+          value={`${connected} / ${data.platforms.length}`}
+          sub="Social + video accounts"
+          icon={<Plug2 size={18} />}
+        />
       </div>
 
       <div className="grid-2">
         <div className="card">
           <div className="card-head">
             <div>
-              <h3>Top scenes</h3>
+              <h3>Top posts</h3>
               <p>Ranked by tracked clicks</p>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('scenes')}>
-              All scenes <ArrowRight size={14} />
+            <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('posts')}>
+              All posts <ArrowRight size={14} />
             </button>
           </div>
 
-          {sorted.length === 0 ? (
-            <p className="muted">No scenes yet. Create your first scene to start tracking clicks.</p>
+          {sortedPosts.length === 0 ? (
+            <p className="muted">No posts yet. Create your first post to start boosting YouTube views.</p>
           ) : (
             <div className="scene-rank">
-              {sorted.map((sc, i) => {
-                const clicks = sceneClicks(sc)
+              {sortedPosts.map((post, i) => {
+                const clicks = sceneClicks(post)
                 return (
-                  <button key={sc.id} className="rank-row" onClick={() => onNavigate('editor', sc.id)}>
+                  <button
+                    key={post.id}
+                    className="rank-row"
+                    onClick={() => onNavigate('editor', post.id)}
+                  >
                     <span className="rank-num">{i + 1}</span>
-                    <span className="rank-thumb" style={{ background: GRADIENTS[sc.thumbnail] ?? GRADIENTS.mono }}>
+                    <span className="rank-thumb" style={coverStyle(post.thumbnail, 'card')}>
                       <Clapperboard size={16} />
                     </span>
                     <span className="rank-main">
-                      <span className="rank-title">{sc.title}</span>
+                      <span className="rank-title">{post.title}</span>
                       <span className="rank-bar">
-                        <span style={{ width: `${Math.max(4, (clicks / maxClicks) * 100)}%`, background: sc.accent }} />
+                        <span
+                          style={{
+                            width: `${Math.max(4, (clicks / maxPostClicks) * 100)}%`,
+                            background: post.accent,
+                          }}
+                        />
                       </span>
                     </span>
                     <span className="rank-clicks">{formatNumber(clicks)}</span>
-                    <Badge tone={sc.status}>{sc.status}</Badge>
+                    <Badge tone={post.status}>{post.status}</Badge>
                   </button>
                 )
               })}
@@ -100,22 +205,27 @@ export default function Dashboard({ data, onNavigate, onCreate }: Props) {
           <div className="card-head">
             <div>
               <h3>Clicks by platform</h3>
-              <p>Where fans are actually clicking</p>
+              <p>Share of clicks across channels</p>
             </div>
             <TrendingUp size={18} className="muted-icon" />
           </div>
           <div className="platform-bars">
             {platformRows.length === 0 && <p className="muted">No platform clicks yet.</p>}
-            {platformRows.map(({ def, clicks }) => (
-              <div key={def.id} className="platform-bar-row">
-                <PlatformPill short={def.short} color={def.color} bg={def.bg} text={def.text} />
-                <span className="platform-bar-name">{def.name}</span>
-                <span className="platform-bar-track">
-                  <span style={{ width: `${(clicks / maxPlatform) * 100}%`, background: def.color }} />
-                </span>
-                <span className="platform-bar-val">{formatNumber(clicks)}</span>
-              </div>
-            ))}
+            {platformRows.map(({ def, clicks }) => {
+              const pct = totalClicks ? Math.round((clicks / totalClicks) * 100) : 0
+              return (
+                <div key={def.id} className="platform-bar-row">
+                  <PlatformPill short={def.short} color={def.color} bg={def.bg} text={def.text} />
+                  <span className="platform-bar-name">{def.name}</span>
+                  <span className="platform-bar-track">
+                    <span style={{ width: `${(clicks / maxPlatform) * 100}%`, background: def.color }} />
+                  </span>
+                  <span className="platform-bar-val">
+                    {formatNumber(clicks)} · {pct}%
+                  </span>
+                </div>
+              )
+            })}
           </div>
 
           <div className="divider" />
@@ -132,40 +242,82 @@ export default function Dashboard({ data, onNavigate, onCreate }: Props) {
         </div>
       </div>
 
+      {linkRows.length > 0 && (
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <h3>All tracked links</h3>
+              <p>Every platform link with its click count</p>
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Post</th>
+                  <th>Platform</th>
+                  <th>Label</th>
+                  <th>Destination</th>
+                  <th style={{ textAlign: 'right' }}>Clicks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {linkRows.map((r, i) => {
+                  const def = platformById(r.platform as never)
+                  return (
+                    <tr key={i}>
+                      <td>
+                        <button
+                          type="button"
+                          className="link-toggle-btn"
+                          style={{ color: 'var(--text)' }}
+                          onClick={() => onNavigate('editor', r.postId)}
+                        >
+                          <strong>{r.postTitle}</strong>
+                        </button>
+                        <div className="muted small">/s/{r.slug}</div>
+                      </td>
+                      <td>
+                        <PlatformPill short={def.short} color={def.color} bg={def.bg} text={def.text} /> {def.name}
+                      </td>
+                      <td>{r.label}</td>
+                      <td className="muted cell-url">{r.url || '—'}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <strong>{formatNumber(r.clicks)}</strong>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="card hero-card">
         <div className="hero-copy">
           <Badge tone="accent">How SceneBoost works</Badge>
-          <h2>One scene. One link. Every platform.</h2>
+          <h2>Post to YouTube first. Boost everywhere.</h2>
           <p>
-            Create a scene for your video or drop, add a link for each platform, and share a single hub link
-            everywhere — bios, captions, QR codes and press releases. Every click is tracked with UTMs so you
-            know which platform is actually boosting the scene.
+            Fetch your video, credits, top description and thumbnail from your Scenering folder, generate SEO-friendly
+            tags with Gemini, upload the 4 items to YouTube, and create native social posts that play the video in YouTube.
           </p>
           <div className="hero-steps">
-            <span><strong>1</strong> Create a scene</span>
-            <span><strong>2</strong> Add platform links</span>
-            <span><strong>3</strong> Share the hub link</span>
-            <span><strong>4</strong> Watch clicks roll in</span>
+            <span><strong>1</strong> Fetch Scenering folder</span>
+            <span><strong>2</strong> Upload 4 items to YouTube</span>
+            <span><strong>3</strong> Paste YouTube link</span>
+            <span><strong>4</strong> Fetch social posts</span>
           </div>
         </div>
         <div className="hero-actions">
           <button className="btn btn-accent" onClick={onCreate}>
-            <Plus size={16} /> Create your first scene
+            <Plus size={16} /> Create a new post
           </button>
           <button className="btn btn-ghost" onClick={() => onNavigate('share')}>
-            <Share2Icon /> Open Share Kit
+            Open Share Kit <ArrowRight size={15} />
           </button>
         </div>
       </div>
     </div>
-  )
-}
-
-function Share2Icon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
-      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-    </svg>
   )
 }

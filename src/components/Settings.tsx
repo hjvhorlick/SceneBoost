@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Save, RotateCcw, Zap } from 'lucide-react'
+import { Save, RotateCcw, Zap, Check, KeyRound } from 'lucide-react'
 import type { AppData, AppSettings } from '../types'
 import { ACCENTS } from '../lib/platforms'
-import { Check } from 'lucide-react'
+import { loadGeminiApiKey, saveGeminiApiKey } from '../lib/gemini'
+import { loadGoogleOAuthClientId, saveGoogleOAuthClientId } from '../lib/youtube'
 
 interface Props {
   data: AppData
@@ -13,6 +14,8 @@ interface Props {
 
 export default function Settings({ data, onSave, onReset, notify }: Props) {
   const [draft, setDraft] = useState<AppSettings>(data.settings)
+  const [geminiKey, setGeminiKey] = useState<string>(() => loadGeminiApiKey())
+  const [oauthClientId, setOauthClientId] = useState<string>(() => loadGoogleOAuthClientId())
   const [confirmReset, setConfirmReset] = useState(false)
 
   const set = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
@@ -103,9 +106,71 @@ export default function Settings({ data, onSave, onReset, notify }: Props) {
           <div className="utm-preview">
             <span className="muted small">Example tracked URL</span>
             <code>
-              https://youtube.com/watch?v=…?utm_source=youtube&amp;utm_medium={draft.defaultMedium || 'social'}&amp;utm_campaign={draft.defaultCampaign || 'campaign'}&amp;utm_content=your-scene-slug
+              https://youtube.com/watch?v=…?utm_source=youtube&amp;utm_medium={draft.defaultMedium || 'social'}&amp;utm_campaign={draft.defaultCampaign || 'campaign'}&amp;utm_content=your-post-slug
             </code>
           </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <h3>Google API Key — Gemini SEO Tags &amp; Instant YouTube Sync</h3>
+            <p>
+              Generates strictly SEO-friendly YouTube tags with Gemini and fetches each newly posted video’s own YouTube URL (`https://youtu.be/...`) as soon as it is created.
+            </p>
+          </div>
+          <KeyRound size={18} className="muted-icon" />
+        </div>
+        <div className="btn-row">
+          <input
+            type="password"
+            style={{ flex: 1 }}
+            value={geminiKey}
+            onChange={(e) => setGeminiKey(e.target.value)}
+            placeholder="AIzaSy… (Google AI Studio / YouTube Data API key)"
+          />
+          <button
+            type="button"
+            className="btn btn-accent btn-sm"
+            onClick={() => {
+              saveGeminiApiKey(geminiKey)
+              notify(geminiKey.trim() ? 'Google API key saved ✓' : 'Google API key cleared')
+            }}
+          >
+            <Save size={14} /> Save API key
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <h3>1-Click YouTube Direct Upload (Optional OAuth Client ID)</h3>
+            <p>
+              Optional: add a Google Cloud Web OAuth Client ID (`….apps.googleusercontent.com`) to upload your Scenering video directly from SceneBoost and receive that newly created video’s URL automatically.
+            </p>
+          </div>
+          <KeyRound size={18} className="muted-icon" />
+        </div>
+        <div className="btn-row">
+          <input
+            type="text"
+            style={{ flex: 1 }}
+            value={oauthClientId}
+            onChange={(e) => setOauthClientId(e.target.value)}
+            placeholder="1234567890-abcdef.apps.googleusercontent.com"
+          />
+          <button
+            type="button"
+            className="btn btn-accent btn-sm"
+            onClick={() => {
+              saveGoogleOAuthClientId(oauthClientId)
+              notify(oauthClientId.trim() ? 'YouTube OAuth Client ID saved ✓' : 'YouTube OAuth Client ID cleared')
+            }}
+          >
+            <Save size={14} /> Save OAuth ID
+          </button>
         </div>
       </div>
 
@@ -113,7 +178,7 @@ export default function Settings({ data, onSave, onReset, notify }: Props) {
         <div className="card-head">
           <div>
             <h3>Data</h3>
-            <p>Your scenes, links and clicks live in this browser (localStorage).</p>
+            <p>Your posts, links and clicks live in this browser (localStorage).</p>
           </div>
         </div>
         {!confirmReset ? (

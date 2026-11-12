@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Play, ExternalLink, Copy, Check, Zap, ArrowLeft, Share2 } from 'lucide-react'
 import type { Scene } from '../types'
-import { GRADIENTS, platformById } from '../lib/platforms'
+import { coverStyle, platformById, resolveCoverImageUrl } from '../lib/platforms'
+import { resolveYoutubeBoostUrl } from '../lib/scenering'
 import { buildTrackedUrl, copyText, hubUrl } from '../lib/utils'
 import { Badge } from './ui'
 
@@ -19,6 +20,20 @@ export default function PublicHub({ scene, defaultMedium, defaultCampaign, brand
   const [shared, setShared] = useState(false)
 
   const enabled = [...scene.links].sort((a, b) => a.order - b.order).filter((l) => l.enabled && l.url.trim())
+  const ytTarget = resolveYoutubeBoostUrl(scene)
+
+  useEffect(() => {
+    const prevTitle = document.title
+    document.title = `${scene.title} — ${brandName}`
+    const absCover = new URL(resolveCoverImageUrl(scene.thumbnail), window.location.origin).href
+    for (const sel of ['meta[property="og:image"]', 'meta[name="twitter:image"]']) {
+      const el = document.querySelector(sel)
+      if (el) el.setAttribute('content', absCover)
+    }
+    return () => {
+      document.title = prevTitle
+    }
+  }, [scene.title, scene.thumbnail, brandName])
 
   const handleClick = (linkId: string, url: string) => {
     onTrackClick(scene.id, linkId)
@@ -57,16 +72,16 @@ export default function PublicHub({ scene, defaultMedium, defaultCampaign, brand
       </div>
 
       <div className="hub-wrap">
-        <div className="hub-hero" style={{ background: GRADIENTS[scene.thumbnail] ?? GRADIENTS.mono }}>
+        <div className="hub-hero" style={coverStyle(scene.thumbnail, 'hero')}>
           <div className="hub-hero-inner">
             <span className="hub-brand">
               <Zap size={14} strokeWidth={2.6} /> {brandName}
             </span>
             <h1>{scene.title}</h1>
             <p>{scene.description}</p>
-            {scene.videoUrl && (
-              <a className="btn btn-accent" href={scene.videoUrl} target="_blank" rel="noreferrer">
-                <Play size={16} /> Watch now
+            {ytTarget.url && (
+              <a className="btn btn-accent" href={ytTarget.url} target="_blank" rel="noreferrer">
+                <Play size={16} /> Watch Full Video on YouTube
               </a>
             )}
           </div>
@@ -75,13 +90,13 @@ export default function PublicHub({ scene, defaultMedium, defaultCampaign, brand
         <div className="hub-body">
           {scene.status !== 'live' && (
             <div className="hub-notice">
-              This scene is <strong>{scene.status}</strong> — fans will see this page, but you may want to go live
+              This post is <strong>{scene.status}</strong> — viewers will see this page, but you may want to go live
               before sharing it widely.
             </div>
           )}
 
           {enabled.length === 0 ? (
-            <p className="muted center">No active platform links yet. Add links in the scene editor.</p>
+            <p className="muted center">No active platform links yet. Add links in the post editor.</p>
           ) : (
             <div className="hub-links">
               {enabled.map((link) => {

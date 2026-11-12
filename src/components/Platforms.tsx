@@ -19,7 +19,7 @@ export default function Platforms({ data, onToggle, onHandle, notify }: Props) {
         <div>
           <h1>Platforms</h1>
           <p className="page-sub">
-            Connect the social and video accounts you publish to. Connected platforms appear first in the scene editor.
+            Connect the social and video accounts you publish to. Connected platforms appear first in the post editor.
           </p>
         </div>
         <div className="page-actions">
@@ -62,7 +62,7 @@ export default function Platforms({ data, onToggle, onHandle, notify }: Props) {
                 <input
                   value={settings?.defaultHandle ?? ''}
                   onChange={(e) => onHandle(def.id, e.target.value)}
-                  placeholder={def.id === 'website' ? 'shop.yourbrand.com' : '@yourhandle'}
+                  placeholder={def.placeholder}
                   disabled={!connected}
                 />
               </label>
@@ -93,7 +93,7 @@ export default function Platforms({ data, onToggle, onHandle, notify }: Props) {
         <div className="how-grid">
           <div>
             <strong>utm_source</strong>
-            <p className="muted">The platform — e.g. <code>youtube</code>, <code>tiktok</code>, <code>instagram</code>.</p>
+            <p className="muted">The platform — e.g. <code>youtube</code>, <code>tiktok</code>, <code>twitch</code>, <code>vimeo</code>.</p>
           </div>
           <div>
             <strong>utm_medium</strong>
@@ -105,7 +105,7 @@ export default function Platforms({ data, onToggle, onHandle, notify }: Props) {
           </div>
           <div>
             <strong>utm_content</strong>
-            <p className="muted">The scene slug — so you can compare scenes inside any analytics tool.</p>
+            <p className="muted">The post slug — so you can compare posts inside any analytics tool.</p>
           </div>
         </div>
         <p className="muted small" style={{ marginTop: 12 }}>
