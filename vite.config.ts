@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
-function youtubeFeedProxyPlugin(): Plugin {
+function youtubeProxyPlugin(): Plugin {
   const handler = async (
     req: { url?: string },
     res: {
@@ -11,40 +11,90 @@ function youtubeFeedProxyPlugin(): Plugin {
     },
     next: () => void
   ) => {
-    if (!req.url?.startsWith('/api/youtube/latest')) {
+    if (!req.url?.startsWith('/api/youtube/')) {
       next()
       return
     }
     try {
       const parsed = new URL(req.url, 'http://localhost')
-      const channelId = parsed.searchParams.get('channelId')?.trim() || ''
-      if (!/^UC[a-zA-Z0-9_-]{22}$/.test(channelId)) {
-        res.statusCode = 400
-        res.end('Invalid channelId')
-        return
-      }
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 1800)
-      try {
-        const upstream = await fetch(
-          `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(
-            channelId
-          )}&_=${Date.now()}`,
-          { signal: controller.signal }
-        )
-        if (!upstream.ok) {
-          res.statusCode = 502
-          res.end('Upstream error')
+
+      if (parsed.pathname === '/api/youtube/latest') {
+        const channelId = parsed.searchParams.get('channelId')?.trim() || ''
+        if (!/^UC[a-zA-Z0-9_-]{22}$/.test(channelId)) {
+          res.statusCode = 400
+          res.end('Invalid channelId')
           return
         }
-        const xml = await upstream.text()
-        res.statusCode = 200
-        res.setHeader('Content-Type', 'application/xml; charset=utf-8')
-        res.setHeader('Cache-Control', 'no-store')
-        res.end(xml)
-      } finally {
-        clearTimeout(timer)
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 3500)
+        try {
+          const upstream = await fetch(
+            `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(
+              channelId
+            )}&_=${Date.now()}`,
+            { signal: controller.signal }
+          )
+          if (!upstream.ok) {
+            res.statusCode = 502
+            res.end('Upstream error')
+            return
+          }
+          const xml = await upstream.text()
+          res.statusCode = 200
+          res.setHeader('Content-Type', 'application/xml; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-store')
+          res.end(xml)
+        } finally {
+          clearTimeout(timer)
+        }
+        return
       }
+
+      if (parsed.pathname === '/api/youtube/verify') {
+        const videoId = parsed.searchParams.get('videoId')?.trim() || ''
+        if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
+          res.statusCode = 400
+          res.end(JSON.stringify({ ok: false, error: 'Invalid videoId' }))
+          return
+        }
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 3500)
+        try {
+          const watchUrl = `https://www.youtube.com/watch?v=${videoId}`
+          const upstream = await fetch(
+            `https://www.youtube.com/oembed?url=${encodeURIComponent(watchUrl)}&format=json`,
+            { signal: controller.signal }
+          )
+          if (!upstream.ok) {
+            res.statusCode = 404
+            res.setHeader('Content-Type', 'application/json; charset=utf-8')
+            res.end(JSON.stringify({ ok: false }))
+            return
+          }
+          const meta = (await upstream.json()) as {
+            title?: string
+            author_name?: string
+            author_url?: string
+          }
+          res.statusCode = 200
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-store')
+          res.end(
+            JSON.stringify({
+              ok: true,
+              videoId,
+              title: meta.title || '',
+              authorName: meta.author_name || '',
+              authorUrl: meta.author_url || '',
+            })
+          )
+        } finally {
+          clearTimeout(timer)
+        }
+        return
+      }
+
+      next()
     } catch {
       res.statusCode = 503
       res.end('Unavailable')
@@ -52,7 +102,7 @@ function youtubeFeedProxyPlugin(): Plugin {
   }
 
   return {
-    name: 'sceneboost-youtube-feed-proxy',
+    name: 'sceneboost-youtube-proxy',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         void handler(req, res, next)
@@ -67,7 +117,7 @@ function youtubeFeedProxyPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), youtubeFeedProxyPlugin()],
+  plugins: [react(), youtubeProxyPlugin()],
   server: {
     host: '0.0.0.0',
     port: 5173,

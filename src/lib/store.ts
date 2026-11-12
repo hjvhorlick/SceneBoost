@@ -62,7 +62,8 @@ function seed(): AppData {
         'The official video is live. Watch it everywhere, share your favourite scene and tag @sceneboost — best fan edit wins a signed vinyl.',
       thumbnail: 'neon',
       videoUrl: '',
-      status: 'live',
+      youtubeVerified: false,
+      status: 'draft',
       accent: '#FF3D81',
       createdAt: iso(12),
       updatedAt: iso(0, 3),
@@ -81,7 +82,8 @@ function seed(): AppData {
         'Inside the room where Neon Nights was mixed. Full episode on YouTube, highlights on TikTok, Facebook and LinkedIn.',
       thumbnail: 'ocean',
       videoUrl: '',
-      status: 'live',
+      youtubeVerified: false,
+      status: 'draft',
       accent: '#00C9FF',
       createdAt: iso(6),
       updatedAt: iso(1, 5),
@@ -182,17 +184,27 @@ function migrateDemoProfiles(data: AppData): AppData {
 
   const scenes = data.scenes.map((scene) => {
     const migratedVideoUrl = DEMO_URL_MIGRATION[scene.videoUrl] ?? scene.videoUrl
-    // Each video has its own unique YouTube URL — never treat the generic channel homepage as a per-video URL
-    const cleanPerVideoUrl = migratedVideoUrl === YOUTUBE_URL ? '' : migratedVideoUrl
+    // Clear any unverified or generic channel URL so SceneBoost NEVER pretends a video was posted
+    // unless `youtubeVerified === true` with a valid 11-char YouTube video ID.
+    const hasVerifiedVideo =
+      scene.youtubeVerified === true &&
+      Boolean(migratedVideoUrl && /(?:youtu\.be\/|v=|\/shorts\/|\/live\/)([a-zA-Z0-9_-]{11})/.test(migratedVideoUrl))
+    const cleanPerVideoUrl = hasVerifiedVideo ? migratedVideoUrl : ''
     return {
       ...scene,
       videoUrl: cleanPerVideoUrl,
+      youtubeVerified: hasVerifiedVideo,
+      youtubeVideoTitle: hasVerifiedVideo ? scene.youtubeVideoTitle : undefined,
+      youtubeFetchedAt: hasVerifiedVideo ? scene.youtubeFetchedAt : undefined,
+      status: hasVerifiedVideo ? scene.status : scene.status === 'live' ? 'draft' : scene.status,
       links: scene.links
         .filter((link) => validIds.has(link.platform as string))
         .map((link) => {
           const wasDemoWebsite =
             link.platform === 'website' && link.url in DEMO_URL_MIGRATION
-          const url = DEMO_URL_MIGRATION[link.url] ?? link.url
+          const rawUrl = DEMO_URL_MIGRATION[link.url] ?? link.url
+          const url =
+            link.platform === 'youtube' && !hasVerifiedVideo ? YOUTUBE_URL : rawUrl
           const label =
             wasDemoWebsite &&
             (link.label === 'Get the vinyl — limited drop' || link.label === 'Join the waitlist')

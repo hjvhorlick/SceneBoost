@@ -15,6 +15,8 @@ import {
   renderImageFileToYoutubeThumbnail,
 } from './lib/scenering'
 import { loadData, saveData, resetData } from './lib/store'
+import { deleteVideoFileForPost, saveVideoFileForPost } from './lib/videoStore'
+import { snapshotExistingChannelVideoIds } from './lib/youtube'
 import { slugify, uid } from './lib/utils'
 import type { AppData, PlatformId, Scene, SceneLink } from './types'
 
@@ -123,8 +125,9 @@ export default function App() {
     const title = newTitle.trim() || 'Untitled post'
     const slugBase = slugify(title)
     const exists = data.scenes.some((s) => s.slug === slugBase)
+    const sceneId = uid()
     const scene: Scene = {
-      id: uid(),
+      id: sceneId,
       title,
       slug: exists ? `${slugBase}-${uid().slice(0, 4)}` : slugBase,
       description: '',
@@ -132,6 +135,7 @@ export default function App() {
       thumbnail: newThumbDataUrl || 'neon',
       thumbnailFileName: newThumbName || undefined,
       videoUrl: '',
+      youtubeVerified: false,
       status: 'draft',
       accent: data.settings.accent,
       createdAt: new Date().toISOString(),
@@ -146,17 +150,31 @@ export default function App() {
         ...d.activity,
       ].slice(0, 20),
     }))
+    // Snapshot existing channel video IDs so old videos on your channel can never be mistaken for a new upload
+    void snapshotExistingChannelVideoIds(data.platforms).then((existingIds) => {
+      if (existingIds.length > 0) {
+        setData((d) => ({
+          ...d,
+          scenes: d.scenes.map((s) =>
+            s.id === sceneId ? { ...s, knownChannelVideoIdsAtCreate: existingIds } : s
+          ),
+        }))
+      }
+    })
     setShowCreate(false)
     setNewTitle('')
     setNewThumbDataUrl('')
     setNewThumbName('')
-    notify('Post created — prepare your 4 YouTube items first!')
+    notify('Post created as Draft — upload or verify on YouTube to go Live')
     navigate('editor', scene.id)
   }
 
   const createSceneFromScenering = async (files: FileList | null) => {
     if (!files || files.length === 0) return
-    const imported = await parseSceneringFiles(files)
+    const [imported, existingChannelIds] = await Promise.all([
+      parseSceneringFiles(files),
+      snapshotExistingChannelVideoIds(data.platforms),
+    ])
     const title = (newTitle.trim() || imported.title || 'Untitled post').trim()
     const slugBase = slugify(title)
     const exists = data.scenes.some((s) => s.slug === slugBase)
@@ -164,6 +182,7 @@ export default function App() {
     const sceneId = uid()
     if (imported.videoFile) {
       videoFilesByPostRef.current.set(sceneId, imported.videoFile)
+      void saveVideoFileForPost(sceneId, imported.videoFile)
     }
     const scene: Scene = {
       id: sceneId,
@@ -178,6 +197,8 @@ export default function App() {
       thumbnailFileName: newThumbName || imported.thumbnailFileName || undefined,
       thumbnailMissing: !hasThumb,
       videoUrl: '',
+      youtubeVerified: false,
+      knownChannelVideoIdsAtCreate: existingChannelIds,
       status: 'draft',
       accent: data.settings.accent,
       createdAt: new Date().toISOString(),
@@ -198,8 +219,8 @@ export default function App() {
     setNewThumbName('')
     notify(
       hasThumb
-        ? 'Fetched video, credits, top description & thumbnail ✓'
-        : 'Fetched video & credits — upload a thumbnail in Item 3'
+        ? 'Folder loaded — now upload the video to YouTube to go Live'
+        : 'Folder loaded — upload a thumbnail in Item 3, then upload to YouTube'
     )
     navigate('editor', scene.id)
   }
@@ -216,6 +237,8 @@ export default function App() {
 
   const deleteScene = (id: string) => {
     const target = data.scenes.find((s) => s.id === id)
+    videoFilesByPostRef.current.delete(id)
+    void deleteVideoFileForPost(id)
     setData((d) => ({
       ...d,
       scenes: d.scenes.filter((s) => s.id !== id),
@@ -230,6 +253,11 @@ export default function App() {
   }
 
   const toggleStatus = (id: string) => {
+    const target = data.scenes.find((s) => s.id === id)
+    if (target && target.status !== 'live' && !target.youtubeVerified) {
+      notify('Upload or verify the video on YouTube first before marking Live')
+      return
+    }
     setData((d) => ({
       ...d,
       scenes: d.scenes.map((s) =>

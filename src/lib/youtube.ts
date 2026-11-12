@@ -1,19 +1,25 @@
 import type { PlatformSettings, Scene } from '../types'
-import { extractYoutubeVideoId, toCanonicalYoutubeVideoUrl } from './scenering'
+import { extractYoutubeVideoId } from './scenering'
 import { loadGeminiApiKey } from './gemini'
 
 export const DEFAULT_YOUTUBE_CHANNEL_ID = 'UCV9v30xQPdbhwM5lAZC2MRQ'
 const GOOGLE_OAUTH_CLIENT_ID_KEY = 'scenboost_google_oauth_client_id'
+const CONNECTED_CHANNEL_TITLE_KEY = 'scenboost_yt_channel_title'
 
 let cachedAccessToken = ''
 let cachedTokenExpiresAt = 0
 
 export function loadGoogleOAuthClientId(): string {
   try {
-    return localStorage.getItem(GOOGLE_OAUTH_CLIENT_ID_KEY)?.trim() || ''
+    const stored = localStorage.getItem(GOOGLE_OAUTH_CLIENT_ID_KEY)?.trim()
+    if (stored) return stored
   } catch {
-    return ''
+    // ignore storage restrictions
   }
+  const envId = (
+    import.meta as ImportMeta & { env?: Record<string, string | undefined> }
+  ).env?.VITE_GOOGLE_CLIENT_ID?.trim()
+  return envId || ''
 }
 
 export function saveGoogleOAuthClientId(clientId: string): void {
@@ -23,16 +29,31 @@ export function saveGoogleOAuthClientId(clientId: string): void {
       localStorage.setItem(GOOGLE_OAUTH_CLIENT_ID_KEY, trimmed)
     } else {
       localStorage.removeItem(GOOGLE_OAUTH_CLIENT_ID_KEY)
+      sessionStorage.removeItem(CONNECTED_CHANNEL_TITLE_KEY)
+      cachedAccessToken = ''
+      cachedTokenExpiresAt = 0
     }
   } catch {
     // ignore storage restrictions
   }
 }
 
+export function getConnectedYoutubeChannelLabel(): string {
+  try {
+    return sessionStorage.getItem(CONNECTED_CHANNEL_TITLE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function hasActiveYoutubeUploadSession(): boolean {
+  return Boolean(cachedAccessToken && Date.now() < cachedTokenExpiresAt - 30_000)
+}
+
 export interface YoutubeChannelVideo {
   videoId: string
   title: string
-  url: string // That specific video's own unique URL: https://youtu.be/<videoId>
+  url: string // Strictly `https://youtu.be/<videoId>`
   publishedAt: string
   thumbnailUrl?: string
 }
@@ -43,6 +64,7 @@ export interface AutoYoutubeFetchResult {
   channelId: string
   checkedCount: number
   source: string
+  reason?: string
 }
 
 export function extractYoutubeChannelId(platforms?: PlatformSettings[]): string {
@@ -51,10 +73,6 @@ export function extractYoutubeChannelId(platforms?: PlatformSettings[]): string 
   return match?.[1] || DEFAULT_YOUTUBE_CHANNEL_ID
 }
 
-/**
- * Loads Google Identity Services (`accounts.google.com/gsi/client`) on demand
- * and requests an OAuth 2.0 access token for YouTube Upload & Read.
- */
 interface GisTokenClient {
   requestAccessToken: (overrideConfig?: { prompt?: string }) => void
 }
@@ -103,13 +121,16 @@ function loadGisScript(): Promise<void> {
   })
 }
 
-export async function requestYoutubeAccessToken(clientId: string): Promise<string> {
-  if (cachedAccessToken && Date.now() < cachedTokenExpiresAt - 30_000) {
+export async function requestYoutubeAccessToken(
+  clientId: string,
+  forceConsent = false
+): Promise<string> {
+  if (!forceConsent && cachedAccessToken && Date.now() < cachedTokenExpiresAt - 30_000) {
     return cachedAccessToken
   }
   const cleanId = clientId.trim()
   if (!cleanId) {
-    throw new Error('Add your Google OAuth Client ID in Settings first')
+    throw new Error('Google OAuth Client ID is required to upload directly to YouTube')
   }
   await loadGisScript()
   const oauth2 = window.google?.accounts?.oauth2
@@ -131,11 +152,42 @@ export async function requestYoutubeAccessToken(clientId: string): Promise<strin
         resolve(resp.access_token)
       },
       error_callback: (err) => {
-        reject(new Error(err?.message || 'Google authorization popup closed'))
+        reject(new Error(err?.message || 'Google authorization popup closed before completing sign-in'))
       },
     })
-    tokenClient.requestAccessToken({ prompt: '' })
+    tokenClient.requestAccessToken({ prompt: forceConsent ? 'consent' : '' })
   })
+}
+
+/**
+ * Connects and verifies the user's YouTube channel via Google OAuth 2.0 so
+ * SceneBoost can upload videos directly to YouTube.
+ */
+export async function connectYoutubeAccount(
+  clientId: string
+): Promise<{ channelId: string; channelTitle: string }> {
+  const token = await requestYoutubeAccessToken(clientId, false)
+  const res = await fetch(
+    'https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true',
+    { headers: { Authorization: `Bearer ${token}` } }
+  )
+  if (!res.ok) {
+    throw new Error(`Could not verify YouTube channel (HTTP ${res.status})`)
+  }
+  const json = (await res.json()) as {
+    items?: Array<{ id?: string; snippet?: { title?: string } }>
+  }
+  const ch = json.items?.[0]
+  if (!ch?.id) {
+    throw new Error('No YouTube channel found on the selected Google account')
+  }
+  const label = `${ch.snippet?.title || 'YouTube Channel'} (${ch.id})`
+  try {
+    sessionStorage.setItem(CONNECTED_CHANNEL_TITLE_KEY, label)
+  } catch {
+    // ignore
+  }
+  return { channelId: ch.id, channelTitle: ch.snippet?.title || 'YouTube Channel' }
 }
 
 function dataUrlToBlob(dataUrl: string): Blob | null {
@@ -161,14 +213,14 @@ export interface DirectYoutubeUploadInput {
   tags: string[]
   thumbnailDataUrl?: string
   privacyStatus?: 'public' | 'unlisted' | 'private'
-  onStage?: (stage: string, percent?: number) => void
+  onStage?: (stage: string, percent: number) => void
 }
 
 /**
- * Posts the video + description/credits + SEO tags + thumbnail directly to YouTube
- * via YouTube Data API v3, captures THAT newly created video's unique URL
- * (`https://youtu.be/<videoId>`) the moment YouTube creates it, and returns it
- * to be placed into SceneBoost for all the other social posts.
+ * Uploads the actual video file + title + script/complete credit document + SEO tags +
+ * 1280x720 thumbnail to YouTube via YouTube Data API v3, then VERIFIES on YouTube's
+ * servers that the video (`videos?id=<newId>`) genuinely exists before returning its
+ * `https://youtu.be/<videoId>` URL.
  */
 export async function uploadPostDirectlyToYoutube({
   clientId,
@@ -180,10 +232,14 @@ export async function uploadPostDirectlyToYoutube({
   privacyStatus = 'public',
   onStage,
 }: DirectYoutubeUploadInput): Promise<YoutubeChannelVideo> {
-  onStage?.('Authorizing with YouTube…', 0)
+  if (!videoFile || videoFile.size === 0) {
+    throw new Error('No video file is attached — select your Scenering folder or .mp4/.webm video first')
+  }
+
+  onStage?.('Signing in to YouTube…', 2)
   const accessToken = await requestYoutubeAccessToken(clientId)
 
-  onStage?.('Creating video on YouTube…', 2)
+  onStage?.('Creating new video post on YouTube…', 5)
   const initRes = await fetch(
     'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
     {
@@ -210,7 +266,7 @@ export async function uploadPostDirectlyToYoutube({
   )
 
   if (!initRes.ok) {
-    let errMsg = `YouTube upload init failed (HTTP ${initRes.status})`
+    let errMsg = `YouTube rejected upload start (HTTP ${initRes.status})`
     try {
       const errJson = (await initRes.json()) as { error?: { message?: string } }
       if (errJson?.error?.message) errMsg = errJson.error.message
@@ -225,47 +281,48 @@ export async function uploadPostDirectlyToYoutube({
     throw new Error('YouTube did not return a resumable upload session URL')
   }
 
-  // Stream the video file and capture the newly created video's ID directly from YouTube's response
-  const createdVideo = await new Promise<{ id: string; snippet?: { title?: string; publishedAt?: string } }>(
-    (resolve, reject) => {
-      const xhr = new XMLHttpRequest()
-      xhr.open('PUT', uploadLocation, true)
-      xhr.setRequestHeader('Content-Type', videoFile.type || 'video/mp4')
-      xhr.upload.onprogress = (ev) => {
-        if (ev.lengthComputable) {
-          const pct = Math.min(99, Math.max(3, Math.round((ev.loaded / ev.total) * 95)))
-          onStage?.(`Uploading video to YouTube (${pct}%)…`, pct)
-        }
+  // Stream the real video bytes to YouTube
+  const createdVideo = await new Promise<{
+    id: string
+    snippet?: { title?: string; publishedAt?: string }
+  }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', uploadLocation, true)
+    xhr.setRequestHeader('Content-Type', videoFile.type || 'video/mp4')
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable) {
+        const pct = Math.min(92, Math.max(6, Math.round((ev.loaded / ev.total) * 90)))
+        onStage?.(`Uploading video to YouTube (${pct}%)…`, pct)
       }
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const parsed = JSON.parse(xhr.responseText) as {
-              id?: string
-              snippet?: { title?: string; publishedAt?: string }
-            }
-            if (!parsed.id) {
-              reject(new Error('YouTube finished upload without returning a video ID'))
-              return
-            }
-            resolve({ id: parsed.id, snippet: parsed.snippet })
-          } catch {
-            reject(new Error('Invalid response from YouTube upload endpoint'))
-          }
-        } else {
-          reject(new Error(`YouTube video upload failed (HTTP ${xhr.status})`))
-        }
-      }
-      xhr.onerror = () => reject(new Error('Network error during YouTube video upload'))
-      xhr.send(videoFile)
     }
-  )
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const parsed = JSON.parse(xhr.responseText) as {
+            id?: string
+            snippet?: { title?: string; publishedAt?: string }
+          }
+          if (!parsed.id || !/^[a-zA-Z0-9_-]{11}$/.test(parsed.id)) {
+            reject(new Error('YouTube did not return a valid 11-character video ID'))
+            return
+          }
+          resolve({ id: parsed.id, snippet: parsed.snippet })
+        } catch {
+          reject(new Error('Invalid JSON response from YouTube upload endpoint'))
+        }
+      } else {
+        reject(new Error(`YouTube video upload failed (HTTP ${xhr.status})`))
+      }
+    }
+    xhr.onerror = () => reject(new Error('Network error while uploading video bytes to YouTube'))
+    xhr.send(videoFile)
+  })
 
-  // Upload the 1280x720 thumbnail if provided
+  // Upload 1280x720 custom thumbnail if available
   if (thumbnailDataUrl && thumbnailDataUrl.startsWith('data:image/')) {
     const thumbBlob = dataUrlToBlob(thumbnailDataUrl)
     if (thumbBlob) {
-      onStage?.('Setting 1280×720 thumbnail on YouTube…', 97)
+      onStage?.('Uploading 1280×720 HD thumbnail to YouTube…', 95)
       try {
         await fetch(
           `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(
@@ -281,17 +338,46 @@ export async function uploadPostDirectlyToYoutube({
           }
         )
       } catch {
-        // Non-fatal if custom thumbnails aren't verified on the account yet
+        // Non-fatal if custom thumbnails require phone verification on the YouTube account
       }
     }
   }
 
-  onStage?.('Video URL fetched from YouTube ✓', 100)
+  // Strictly verify on YouTube's servers that the newly created video ID actually exists!
+  onStage?.('Verifying newly created video on YouTube…', 98)
+  const verifyRes = await fetch(
+    `https://www.googleapis.com/youtube/v3/videos?part=snippet,status&id=${encodeURIComponent(
+      createdVideo.id
+    )}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  )
+  if (!verifyRes.ok) {
+    throw new Error(`Upload finished, but verification check failed (HTTP ${verifyRes.status})`)
+  }
+  const verifyJson = (await verifyRes.json()) as {
+    items?: Array<{
+      id?: string
+      snippet?: { title?: string; publishedAt?: string }
+      status?: { uploadStatus?: string }
+    }>
+  }
+  const verifiedItem = verifyJson.items?.[0]
+  if (!verifiedItem || verifiedItem.id !== createdVideo.id) {
+    throw new Error('YouTube verification failed — video was not found on YouTube after upload')
+  }
+  if (verifiedItem.status?.uploadStatus === 'rejected' || verifiedItem.status?.uploadStatus === 'failed') {
+    throw new Error(`YouTube rejected the uploaded video (${verifiedItem.status.uploadStatus})`)
+  }
+
+  onStage?.('Verified on YouTube! Placing video URL into all social posts…', 100)
   return {
     videoId: createdVideo.id,
-    title: createdVideo.snippet?.title || title.trim(),
+    title: verifiedItem.snippet?.title || createdVideo.snippet?.title || title.trim(),
     url: `https://youtu.be/${createdVideo.id}`,
-    publishedAt: createdVideo.snippet?.publishedAt || new Date().toISOString(),
+    publishedAt:
+      verifiedItem.snippet?.publishedAt ||
+      createdVideo.snippet?.publishedAt ||
+      new Date().toISOString(),
     thumbnailUrl: `https://i.ytimg.com/vi/${createdVideo.id}/hqdefault.jpg`,
   }
 }
@@ -318,8 +404,8 @@ export function parseYoutubeAtomXml(xmlText: string): YoutubeChannelVideo[] {
 
       const title = entry.getElementsByTagName('title')[0]?.textContent?.trim() || ''
       const publishedAt =
-        entry.getElementsByTagName('published')[0]?.textContent?.trim() ||
-        new Date().toISOString()
+        entry.getElementsByTagName('published')[0]?.textContent?.trim() || ''
+      if (!publishedAt) continue
 
       videos.push({
         videoId,
@@ -346,15 +432,11 @@ async function fetchWithTimeout(url: string, timeoutMs = 6000): Promise<Response
   }
 }
 
-/**
- * Fetches recently created videos on the YouTube channel so we can grab THAT
- * specific video's unique URL (`https://youtu.be/<videoId>`) right after posting.
- */
 export async function fetchChannelRecentVideos(
   channelId: string,
   apiKey?: string
 ): Promise<{ videos: YoutubeChannelVideo[]; source: string }> {
-  // 0. If user has an active YouTube OAuth token, read `mine=true` uploads (includes unlisted/processing!)
+  // 0. Authenticated YouTube Studio account (`mine=true`) if OAuth session is active
   if (cachedAccessToken && Date.now() < cachedTokenExpiresAt - 15_000) {
     try {
       const chRes = await fetch(
@@ -383,19 +465,18 @@ export async function fetchChannelRecentVideos(
             const videos: YoutubeChannelVideo[] = []
             for (const item of plJson.items ?? []) {
               const videoId = item.contentDetails?.videoId || item.snippet?.resourceId?.videoId || ''
-              if (!videoId) continue
+              const publishedAt =
+                item.contentDetails?.videoPublishedAt || item.snippet?.publishedAt || ''
+              if (!videoId || !publishedAt) continue
               videos.push({
                 videoId,
                 title: item.snippet?.title?.trim() || '',
                 url: `https://youtu.be/${videoId}`,
-                publishedAt:
-                  item.contentDetails?.videoPublishedAt ||
-                  item.snippet?.publishedAt ||
-                  new Date().toISOString(),
+                publishedAt,
                 thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
               })
             }
-            if (videos.length > 0) return { videos, source: 'YouTube Studio Account' }
+            return { videos, source: 'YouTube Studio Account' }
           }
         }
       }
@@ -431,13 +512,11 @@ export async function fetchChannelRecentVideos(
             item.contentDetails?.videoId ||
             item.snippet?.resourceId?.videoId ||
             ''
-          if (!videoId) continue
           const title = item.snippet?.title?.trim() || ''
-          if (title === 'Private video' || title === 'Deleted video') continue
+          if (!videoId || title === 'Private video' || title === 'Deleted video') continue
           const publishedAt =
-            item.contentDetails?.videoPublishedAt ||
-            item.snippet?.publishedAt ||
-            new Date().toISOString()
+            item.contentDetails?.videoPublishedAt || item.snippet?.publishedAt || ''
+          if (!publishedAt) continue
           videos.push({
             videoId,
             title,
@@ -457,12 +536,12 @@ export async function fetchChannelRecentVideos(
   try {
     const res = await fetchWithTimeout(
       `/api/youtube/latest?channelId=${encodeURIComponent(channelId)}&_=${Date.now()}`,
-      2500
+      3500
     )
     if (res.ok) {
       const xml = await res.text()
       if (xml.includes('<feed')) {
-        return { videos: parseYoutubeAtomXml(xml), source: 'YouTube Uploads' }
+        return { videos: parseYoutubeAtomXml(xml), source: 'YouTube Channel Feed' }
       }
     }
   } catch {
@@ -473,47 +552,7 @@ export async function fetchChannelRecentVideos(
     channelId
   )}`
 
-  // 3. Browser-direct RSS-to-JSON bridge
-  try {
-    const res = await fetchWithTimeout(
-      `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feedUrl)}`,
-      6500
-    )
-    if (res.ok) {
-      const data = (await res.json()) as {
-        status?: string
-        items?: Array<{
-          title?: string
-          link?: string
-          guid?: string
-          pubDate?: string
-        }>
-      }
-      if (data.status === 'ok' && Array.isArray(data.items)) {
-        const videos: YoutubeChannelVideo[] = []
-        for (const item of data.items) {
-          const guidMatch = item.guid?.match(/yt:video:([a-zA-Z0-9_-]{11})/)
-          const videoId =
-            guidMatch?.[1] || (item.link ? extractYoutubeVideoId(item.link) : null) || ''
-          if (!videoId) continue
-          videos.push({
-            videoId,
-            title: (item.title || '').trim(),
-            url: `https://youtu.be/${videoId}`,
-            publishedAt: item.pubDate
-              ? new Date(`${item.pubDate.replace(' ', 'T')}Z`).toISOString()
-              : new Date().toISOString(),
-            thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-          })
-        }
-        return { videos, source: 'YouTube Uploads' }
-      }
-    }
-  } catch {
-    // Fall through
-  }
-
-  // 4. Browser-direct raw Atom XML relays
+  // 3. Browser-direct Atom XML relays
   const feedWithBust = `${feedUrl}&_=${Date.now()}`
   const relays = [
     `https://api.allorigins.win/raw?url=${encodeURIComponent(feedWithBust)}`,
@@ -521,11 +560,11 @@ export async function fetchChannelRecentVideos(
   ]
   for (const relayUrl of relays) {
     try {
-      const res = await fetchWithTimeout(relayUrl, 6500)
+      const res = await fetchWithTimeout(relayUrl, 6000)
       if (res.ok) {
         const xml = await res.text()
         if (xml.includes('<feed')) {
-          return { videos: parseYoutubeAtomXml(xml), source: 'YouTube Uploads' }
+          return { videos: parseYoutubeAtomXml(xml), source: 'YouTube Channel Feed' }
         }
       }
     } catch {
@@ -536,6 +575,126 @@ export async function fetchChannelRecentVideos(
   throw new Error('Could not reach YouTube — check your internet connection')
 }
 
+/**
+ * Snapshots the video IDs that ALREADY exist on the YouTube channel BEFORE a new
+ * post is uploaded, so SceneBoost can NEVER mistake an old channel video for a
+ * newly posted video.
+ */
+export async function snapshotExistingChannelVideoIds(
+  platforms?: PlatformSettings[]
+): Promise<string[]> {
+  try {
+    const channelId = extractYoutubeChannelId(platforms)
+    const { videos } = await fetchChannelRecentVideos(channelId)
+    return videos.map((v) => v.videoId).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Verifies via YouTube oEmbed / API that a specific 11-character `videoId`
+ * genuinely exists on YouTube right now.
+ */
+export async function verifyYoutubeVideoIdExists(
+  videoId: string
+): Promise<{ exists: boolean; title: string }> {
+  if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
+    return { exists: false, title: '' }
+  }
+
+  // 1. Authenticated YouTube Data API v3 check (verifies Public, Unlisted, and Private uploads)
+  if (cachedAccessToken && Date.now() < cachedTokenExpiresAt - 15_000) {
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 4000)
+      try {
+        const res = await fetch(
+          `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${encodeURIComponent(videoId)}`,
+          {
+            headers: { Authorization: `Bearer ${cachedAccessToken}` },
+            signal: controller.signal,
+            cache: 'no-store',
+          }
+        )
+        if (res.ok) {
+          const json = (await res.json()) as {
+            items?: Array<{ id?: string; snippet?: { title?: string } }>
+          }
+          if (json.items && json.items.length > 0 && json.items[0].id === videoId) {
+            return { exists: true, title: json.items[0].snippet?.title || '' }
+          }
+          return { exists: false, title: '' }
+        }
+      } finally {
+        clearTimeout(timer)
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // 2. YouTube Data API v3 key check (verifies Public & Unlisted videos instantaneously)
+  const key = loadGeminiApiKey().trim()
+  if (key) {
+    try {
+      const res = await fetchWithTimeout(
+        `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${encodeURIComponent(
+          videoId
+        )}&key=${encodeURIComponent(key)}`,
+        4000
+      )
+      if (res.ok) {
+        const json = (await res.json()) as {
+          items?: Array<{ id?: string; snippet?: { title?: string } }>
+        }
+        if (json.items && json.items.length > 0 && json.items[0].id === videoId) {
+          return { exists: true, title: json.items[0].snippet?.title || '' }
+        }
+        return { exists: false, title: '' }
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // 3. Browser-direct YouTube oEmbed check (CORS-enabled by YouTube directly in the user's browser)
+  try {
+    const watchUrl = `https://www.youtube.com/watch?v=${videoId}`
+    const res = await fetchWithTimeout(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(watchUrl)}&format=json`,
+      4500
+    )
+    if (res.ok) {
+      const meta = (await res.json()) as { title?: string }
+      return { exists: true, title: meta.title || '' }
+    }
+    if (res.status === 404 || res.status === 401 || res.status === 400) {
+      return { exists: false, title: '' }
+    }
+  } catch {
+    // fall through
+  }
+
+  // 4. Same-origin server verification fallback (`/api/youtube/verify`)
+  try {
+    const res = await fetchWithTimeout(
+      `/api/youtube/verify?videoId=${encodeURIComponent(videoId)}`,
+      2500
+    )
+    if (res.ok) {
+      const data = (await res.json()) as { ok?: boolean; title?: string }
+      if (data.ok) {
+        return { exists: true, title: data.title || '' }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return { exists: false, title: '' }
+}
+
 function normalizeForMatch(title: string): string {
   return title
     .toLowerCase()
@@ -544,132 +703,149 @@ function normalizeForMatch(title: string): string {
     .trim()
 }
 
-function tokenizeSignificant(title: string): string[] {
-  const stop = new Set(['the', 'and', 'for', 'with', 'from', 'video', 'official', 'how', 'why', 'what'])
-  return normalizeForMatch(title)
-    .split(' ')
-    .filter((w) => w.length >= 3 && !stop.has(w))
-}
-
 function computeTitleMatchScore(postTitle: string, ytTitle: string): number {
   const a = normalizeForMatch(postTitle)
   const b = normalizeForMatch(ytTitle)
   if (!a || !b) return 0
   if (a === b) return 1
 
-  const shorter = a.length <= b.length ? a : b
-  const longer = a.length <= b.length ? b : a
-  if (shorter.length >= 8 && longer.includes(shorter)) {
-    return 0.9
-  }
-
-  const tokensA = tokenizeSignificant(postTitle)
-  const tokensB = new Set(tokenizeSignificant(ytTitle))
-  if (tokensA.length === 0 || tokensB.size === 0) return 0
+  const wordsA = a.split(' ').filter((w) => w.length >= 3)
+  const wordsB = new Set(b.split(' ').filter((w) => w.length >= 3))
+  if (wordsA.length === 0 || wordsB.size === 0) return 0
 
   let hits = 0
-  for (const t of tokensA) {
-    if (tokensB.has(t)) hits++
+  for (const w of wordsA) {
+    if (wordsB.has(w)) hits++
   }
-  return hits / Math.max(tokensA.length, Math.min(tokensB.size, tokensA.length + 2))
+  return hits / Math.max(wordsA.length, wordsB.size)
 }
 
 /**
- * Checks if the system clipboard currently holds a newly created YouTube video URL
- * (`https://youtu.be/<id>` or `https://www.youtube.com/watch?v=<id>`) copied from
- * YouTube Studio as the video was created.
- */
-export async function tryReadYoutubeVideoUrlFromClipboard(
-  usedVideoIds: Set<string>
-): Promise<YoutubeChannelVideo | null> {
-  if (!navigator.clipboard?.readText) return null
-  try {
-    const clip = (await navigator.clipboard.readText()).trim()
-    const videoId = extractYoutubeVideoId(clip)
-    if (!videoId || usedVideoIds.has(videoId)) return null
-    return {
-      videoId,
-      title: '',
-      url: toCanonicalYoutubeVideoUrl(clip),
-      publishedAt: new Date().toISOString(),
-      thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-    }
-  } catch {
-    return null
-  }
-}
-
-/**
- * Fetches THAT newly posted video's own URL (`https://youtu.be/<videoId>`) right
- * after posting to YouTube so SceneBoost can place it into all the rest of the
- * social pages' posts automatically.
+ * STRICT verification for when the user uploaded manually in YouTube Studio and
+ * clicks "Verify & Fetch Newly Uploaded Video":
+ * - Rejects EVERY video that already existed on the channel before this post was created
+ *   (`knownChannelVideoIdsAtCreate` + `publishedAt < post.createdAt`).
+ * - Rejects EVERY video already attached to another post in SceneBoost.
+ * - Confirms the newly uploaded video genuinely exists on YouTube before returning it.
+ * - NEVER fakes or guesses an old video!
  */
 export async function autoFetchYoutubeVideoForPost(
-  post: Pick<Scene, 'id' | 'title' | 'createdAt'>,
-  allPosts: ReadonlyArray<Pick<Scene, 'id' | 'videoUrl'>>,
-  platforms?: PlatformSettings[],
-  options?: { checkClipboard?: boolean }
+  post: Pick<Scene, 'id' | 'title' | 'createdAt' | 'knownChannelVideoIdsAtCreate'>,
+  allPosts: ReadonlyArray<Pick<Scene, 'id' | 'videoUrl' | 'youtubeVerified'>>,
+  platforms?: PlatformSettings[]
 ): Promise<AutoYoutubeFetchResult> {
   const channelId = extractYoutubeChannelId(platforms)
+  const { videos, source } = await fetchChannelRecentVideos(channelId)
 
-  const usedVideoIds = new Set<string>()
+  const excludedVideoIds = new Set<string>(post.knownChannelVideoIdsAtCreate ?? [])
   for (const other of allPosts) {
     if (other.id === post.id) continue
     const vid = extractYoutubeVideoId(other.videoUrl || '')
-    if (vid) usedVideoIds.add(vid)
+    if (vid) excludedVideoIds.add(vid)
   }
 
-  // First: if user clicked "Fetch Video URL" right after YouTube Studio created the video
-  // and copied its `https://youtu.be/<id>` link, grab it immediately (even while processing/unlisted!)
-  if (options?.checkClipboard) {
-    const fromClip = await tryReadYoutubeVideoUrlFromClipboard(usedVideoIds)
-    if (fromClip) {
-      return {
-        matched: { ...fromClip, title: post.title },
-        latestOnChannel: fromClip,
-        channelId,
-        checkedCount: 1,
-        source: 'YouTube Video Link',
-      }
-    }
-  }
+  const createdMs = Date.parse(post.createdAt) || Date.now()
+  // Only accept videos published AFTER this SceneBoost post was created (90s clock-skew tolerance)
+  const minPublishedMs = createdMs - 90 * 1000
 
-  const { videos, source } = await fetchChannelRecentVideos(channelId)
+  const genuinelyNewVideos = videos.filter((v) => {
+    if (excludedVideoIds.has(v.videoId)) return false
+    const pubMs = Date.parse(v.publishedAt)
+    if (!Number.isFinite(pubMs)) return false
+    return pubMs >= minPublishedMs
+  })
 
-  // 1. Match by title against newly created/published videos on the channel
-  let bestVideo: YoutubeChannelVideo | null = null
-  let bestScore = 0
-  for (const v of videos) {
-    const score = computeTitleMatchScore(post.title, v.title)
-    if (score > bestScore) {
-      bestScore = score
-      bestVideo = v
-    }
-  }
-  if (bestVideo && bestScore >= 0.58) {
+  if (genuinelyNewVideos.length === 0) {
     return {
-      matched: bestVideo,
+      matched: null,
       latestOnChannel: videos[0] ?? null,
       channelId,
       checkedCount: videos.length,
       source,
+      reason:
+        'No new video has been posted to your YouTube channel since this post was created. Upload the video first (via Direct Upload to YouTube or in YouTube Studio).',
     }
   }
 
-  // 2. Match any brand-new video published since this post was created
-  const createdMs = Date.parse(post.createdAt) || 0
-  const cutoffMs = createdMs > 0 ? createdMs - 15 * 60 * 1000 : Date.now() - 60 * 60 * 1000
-  const freshUpload = videos.find((v) => {
-    if (usedVideoIds.has(v.videoId)) return false
-    const pubMs = Date.parse(v.publishedAt) || 0
-    return pubMs >= cutoffMs
-  })
+  // Pick the best matching genuinely-new upload
+  let chosen = genuinelyNewVideos[0]
+  let bestScore = -1
+  for (const v of genuinelyNewVideos) {
+    const score = computeTitleMatchScore(post.title, v.title)
+    if (score > bestScore) {
+      bestScore = score
+      chosen = v
+    }
+  }
+
+  // Confirm on YouTube that this video ID actually exists
+  const check = await verifyYoutubeVideoIdExists(chosen.videoId)
+  if (!check.exists && source !== 'YouTube Studio Account') {
+    return {
+      matched: null,
+      latestOnChannel: videos[0] ?? null,
+      channelId,
+      checkedCount: videos.length,
+      source,
+      reason: 'Could not verify the new video on YouTube yet — wait a few seconds for YouTube processing and try again.',
+    }
+  }
 
   return {
-    matched: freshUpload ?? null,
+    matched: {
+      ...chosen,
+      title: check.title || chosen.title,
+    },
     latestOnChannel: videos[0] ?? null,
     channelId,
     checkedCount: videos.length,
     source,
+  }
+}
+
+/**
+ * Verifies an explicit YouTube video URL (`https://youtu.be/<id>`) pasted from
+ * YouTube Studio (for example when a newly uploaded video is Unlisted or still
+ * indexing on the public RSS feed). Strictly verifies on YouTube that the video
+ * exists and was NOT one of the pre-existing videos from before this post!
+ */
+export async function verifyStudioVideoUrlForPost(
+  rawUrl: string,
+  post: Pick<Scene, 'id' | 'title' | 'knownChannelVideoIdsAtCreate'>,
+  allPosts: ReadonlyArray<Pick<Scene, 'id' | 'videoUrl'>>
+): Promise<YoutubeChannelVideo> {
+  const videoId = extractYoutubeVideoId(rawUrl)
+  if (!videoId) {
+    throw new Error(
+      'That is not a specific YouTube video URL — paste a real video link like https://youtu.be/XXXXXXXXXXX'
+    )
+  }
+
+  if (post.knownChannelVideoIdsAtCreate?.includes(videoId)) {
+    throw new Error(
+      'That video was already on your YouTube channel before this post was created — upload your new video first'
+    )
+  }
+
+  for (const other of allPosts) {
+    if (other.id === post.id) continue
+    if (extractYoutubeVideoId(other.videoUrl || '') === videoId) {
+      throw new Error('That YouTube video URL is already linked to another post in SceneBoost')
+    }
+  }
+
+  const check = await verifyYoutubeVideoIdExists(videoId)
+  if (!check.exists) {
+    throw new Error(
+      'Could not verify that video on YouTube (it may still be private/uncreated or the link is invalid)'
+    )
+  }
+
+  return {
+    videoId,
+    title: check.title || post.title,
+    url: `https://youtu.be/${videoId}`,
+    publishedAt: new Date().toISOString(),
+    thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
   }
 }

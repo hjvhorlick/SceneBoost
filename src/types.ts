@@ -35,9 +35,11 @@ export interface Scene {
   thumbnailFileName?: string // thumbnail file fetched in folder or uploaded
   thumbnailMissing?: boolean // true when folder import found no thumbnail image yet
   thumbnail: string // Scenering cover preset key or imported 1280x720 image data URL
-  videoUrl: string // Automatically fetched YouTube video URL (plays the video in YouTube)
-  youtubeVideoTitle?: string // Exact video title returned from YouTube when auto-fetched
-  youtubeFetchedAt?: string // ISO timestamp when SceneBoost fetched the link from YouTube
+  videoUrl: string // Verified per-video YouTube URL (`https://youtu.be/<videoId>`)
+  youtubeVerified?: boolean // true ONLY after real YouTube upload/verification for THIS post
+  youtubeVideoTitle?: string // Exact video title returned from YouTube when verified
+  youtubeFetchedAt?: string // ISO timestamp when SceneBoost verified the new YouTube video
+  knownChannelVideoIdsAtCreate?: string[] // Channel video IDs that already existed before this post was created
   status: SceneStatus
   accent: string // hex
   createdAt: string

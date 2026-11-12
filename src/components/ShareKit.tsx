@@ -86,16 +86,14 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
   }
 
   const syncYoutubeAutomatically = useCallback(
-    async (manualTrigger = false) => {
+    async () => {
       if (!scene || !onUpdateScene || checkingRef.current) return
       if (!scene.title.trim() || scene.title === 'Untitled post') return
 
       checkingRef.current = true
       setYtChecking(true)
       try {
-        const res = await autoFetchYoutubeVideoForPost(scene, data.scenes, data.platforms, {
-          checkClipboard: manualTrigger,
-        })
+        const res = await autoFetchYoutubeVideoForPost(scene, data.scenes, data.platforms)
         if (res.matched) {
           const nowIso = new Date().toISOString()
           const hasYt = scene.links.some((l) => l.platform === 'youtube')
@@ -121,22 +119,22 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
           onUpdateScene({
             ...scene,
             videoUrl: res.matched.url,
+            youtubeVerified: true,
             youtubeVideoTitle: res.matched.title,
             youtubeFetchedAt: nowIso,
             status: 'live',
             links: nextLinks,
             updatedAt: nowIso,
           })
-          if (manualTrigger || scene.videoUrl !== res.matched.url) {
-            notify(`Fetched this video’s URL (${res.matched.url}) & placed in all social posts ✓`)
-          }
-        } else if (manualTrigger) {
-          notify('Video not posted on YouTube yet — post it first, then click Fetch This Video’s URL')
+          notify(`Verified new YouTube video (${res.matched.url}) & placed in all social posts ✓`)
+        } else {
+          notify(
+            res.reason ||
+              'Not posted on YouTube yet — upload the video first in Post Editor or YouTube Studio'
+          )
         }
       } catch (err) {
-        if (manualTrigger) {
-          notify(err instanceof Error ? err.message : 'Could not check YouTube right now')
-        }
+        notify(err instanceof Error ? err.message : 'Could not verify with YouTube right now')
       } finally {
         checkingRef.current = false
         setYtChecking(false)
@@ -144,21 +142,6 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
     },
     [scene, onUpdateScene, data.scenes, data.platforms, notify]
   )
-
-  useEffect(() => {
-    if (!scene || ytBoostTarget.isSpecificVideo) return
-    const t = setTimeout(() => void syncYoutubeAutomatically(false), 600)
-    const onFocus = () => {
-      if (document.visibilityState === 'visible') void syncYoutubeAutomatically(false)
-    }
-    window.addEventListener('focus', onFocus)
-    document.addEventListener('visibilitychange', onFocus)
-    return () => {
-      clearTimeout(t)
-      window.removeEventListener('focus', onFocus)
-      document.removeEventListener('visibilitychange', onFocus)
-    }
-  }, [scene, ytBoostTarget.isSpecificVideo, syncYoutubeAutomatically])
 
   const handleAskGemini = async () => {
     if (!scene || !onUpdateScene) return
@@ -341,16 +324,16 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
                 <Lock size={13} style={{ verticalAlign: -2, marginRight: 6 }} />
                 <strong>
                   {ytBoostTarget.isSpecificVideo
-                    ? 'This Video’s YouTube URL — Placed in All Social Posts'
-                    : 'After Posting the Video → Fetch That Video’s Own URL'}
+                    ? 'Verified on YouTube — Video URL Placed in All Social Posts'
+                    : 'Not Posted to YouTube Yet'}
                 </strong>
               </span>
               <Badge tone={ytBoostTarget.isSpecificVideo ? 'live' : 'draft'}>
                 {ytBoostTarget.isSpecificVideo
-                  ? '✓ Placed in social posts'
+                  ? '✓ Verified on YouTube'
                   : ytChecking
-                  ? 'Fetching…'
-                  : 'Waiting for video'}
+                  ? 'Verifying…'
+                  : 'Not posted yet'}
               </Badge>
             </div>
 
@@ -361,28 +344,37 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
                 </div>
                 <div className="step1-toggles-row">
                   <span className="muted small">
-                    {scene.youtubeFetchedAt ? `Fetched ${timeAgo(scene.youtubeFetchedAt)}` : 'Placed in all social posts'}
+                    {scene.youtubeFetchedAt ? `Verified ${timeAgo(scene.youtubeFetchedAt)}` : 'Verified on YouTube'}
                   </span>
-                  <button
-                    type="button"
+                  <a
                     className="btn btn-ghost btn-sm"
-                    disabled={ytChecking}
-                    onClick={() => void syncYoutubeAutomatically(true)}
+                    href={ytBoostTarget.url}
+                    target="_blank"
+                    rel="noreferrer"
                   >
-                    <RefreshCw size={13} /> Re-fetch Video URL
-                  </button>
+                    <ExternalLink size={13} /> Watch on YouTube
+                  </a>
                 </div>
               </>
             ) : (
               <div className="btn-row">
+                {onEditScene && (
+                  <button
+                    type="button"
+                    className="btn btn-accent btn-sm"
+                    onClick={() => onEditScene(scene.id)}
+                  >
+                    <Youtube size={13} /> Open Editor to Upload Video to YouTube
+                  </button>
+                )}
                 <button
                   type="button"
-                  className="btn btn-accent btn-sm"
+                  className="btn btn-ghost btn-sm"
                   disabled={ytChecking}
-                  onClick={() => void syncYoutubeAutomatically(true)}
+                  onClick={() => void syncYoutubeAutomatically()}
                 >
                   <RefreshCw size={13} />{' '}
-                  {ytChecking ? 'Fetching This Video’s URL…' : 'Video Posted — Fetch This Video’s URL'}
+                  {ytChecking ? 'Verifying on YouTube…' : 'Uploaded in Studio — Verify New Video'}
                 </button>
               </div>
             )}

@@ -730,24 +730,16 @@ export function extractYoutubeVideoId(url: string): string | null {
 }
 
 export function isSpecificYoutubeVideoUrl(url: string): boolean {
-  if (extractYoutubeVideoId(url)) return true
-  const trimmed = url.trim().toLowerCase()
-  return (
-    (trimmed.includes('youtube.com/') || trimmed.includes('youtu.be/')) &&
-    !trimmed.includes('/channel/') &&
-    !trimmed.includes('/@') &&
-    !trimmed.includes('/c/') &&
-    !trimmed.includes('/user/')
-  )
+  return Boolean(extractYoutubeVideoId(url))
 }
 
 export function toCanonicalYoutubeVideoUrl(url: string): string {
   const id = extractYoutubeVideoId(url)
-  return id ? `https://youtu.be/${id}` : url.trim()
+  return id ? `https://youtu.be/${id}` : ''
 }
 
 export function resolveYoutubeBoostUrl(
-  scene: Pick<Scene, 'videoUrl' | 'links'>,
+  scene: Pick<Scene, 'videoUrl' | 'youtubeVerified' | 'links'>,
   platforms?: PlatformSettings[]
 ): { url: string; isSpecificVideo: boolean; channelUrl: string } {
   const ytPlatform = platforms?.find((p) => p.id === 'youtube')
@@ -755,19 +747,12 @@ export function resolveYoutubeBoostUrl(
     ytPlatform?.defaultHandle?.trim() ||
     'https://www.youtube.com/channel/UCV9v30xQPdbhwM5lAZC2MRQ'
 
+  // Strictly require BOTH a valid 11-character YouTube video ID AND `youtubeVerified === true`
+  // so SceneBoost NEVER pretends a video was posted when it hasn't been uploaded/verified.
   const candidateVideo = scene.videoUrl?.trim() || ''
-  if (candidateVideo && isSpecificYoutubeVideoUrl(candidateVideo)) {
+  if (scene.youtubeVerified && candidateVideo && isSpecificYoutubeVideoUrl(candidateVideo)) {
     return {
       url: toCanonicalYoutubeVideoUrl(candidateVideo),
-      isSpecificVideo: true,
-      channelUrl,
-    }
-  }
-
-  const ytLink = scene.links.find((l) => l.platform === 'youtube' && l.enabled && l.url.trim())
-  if (ytLink && isSpecificYoutubeVideoUrl(ytLink.url)) {
-    return {
-      url: toCanonicalYoutubeVideoUrl(ytLink.url),
       isSpecificVideo: true,
       channelUrl,
     }
@@ -880,7 +865,7 @@ export function resolveSceneringWebsiteUrl(platforms?: PlatformSettings[]): stri
  * - Includes that video's fetched YouTube URL (`https://youtu.be/<id>`) to play the video in YouTube
  */
 export function buildSocialBoostPost(
-  scene: Pick<Scene, 'title' | 'slug' | 'description' | 'tags' | 'videoUrl' | 'links'>,
+  scene: Pick<Scene, 'title' | 'slug' | 'description' | 'tags' | 'videoUrl' | 'youtubeVerified' | 'links'>,
   platform: SocialBoostPlatform,
   options?: {
     platforms?: PlatformSettings[]
@@ -945,7 +930,7 @@ export function buildSocialBoostPost(
 }
 
 export function buildPostWording(
-  scene: Pick<Scene, 'title' | 'slug' | 'description' | 'credits' | 'tags' | 'videoUrl' | 'links'>,
+  scene: Pick<Scene, 'title' | 'slug' | 'description' | 'credits' | 'tags' | 'videoUrl' | 'youtubeVerified' | 'links'>,
   platform: PostTemplatePlatform,
   options?: {
     platforms?: PlatformSettings[]
