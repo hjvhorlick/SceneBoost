@@ -1,11 +1,14 @@
 export type PlatformId =
   | 'youtube'
   | 'tiktok'
-  | 'instagram'
   | 'facebook'
-  | 'x'
   | 'linkedin'
-  | 'spotify'
+  | 'x'
+  | 'twitch'
+  | 'kick'
+  | 'vimeo'
+  | 'threads'
+  | 'instagram'
   | 'website'
 
 export type SceneStatus = 'live' | 'draft' | 'paused'

@@ -2,7 +2,7 @@
 
 **Create marketing links to social media and video platforms.**
 
-SceneBoost gives creators, artists and brands one smart link per *scene* (a video, drop or campaign) that fans can use to watch, listen and shop across every platform — with UTM tracking built in so you know which platform is actually boosting the scene.
+SceneBoost gives creators, artists and brands one smart link per *scene* (a video, drop or campaign) that fans can use to watch, stream and share across every video and social platform — with UTM tracking built in so you know which platform is actually boosting the scene.
 
 > One scene. One link. Every platform.
 
@@ -14,10 +14,10 @@ SceneBoost gives creators, artists and brands one smart link per *scene* (a vide
 |---|---|
 | **Dashboard** | Total clicks, live scenes, active links, connected platforms, top scenes, clicks-by-platform and recent activity |
 | **Scenes** | Full CRUD for scenes — title, slug, description, video URL, thumbnail style, accent colour, live/draft/paused status |
-| **Platform links** | Add a link per platform (YouTube, TikTok, Instagram, Facebook, X, LinkedIn, Spotify, Website/Custom), reorder, enable/disable, with automatic UTM parameters |
+| **Platform links** | Add a link per platform (YouTube, TikTok, Facebook, LinkedIn, X, Twitch, Kick, Vimeo, Threads, Instagram, Website/Custom), reorder, enable/disable, with automatic UTM parameters |
 | **Public hub** | A shareable page at `#/s/{slug}` with a hero, platform buttons, copy-link and native share — every click is tracked back to the scene + link |
 | **Analytics** | Clicks per platform, per scene and per link, leaderboard, and CSV export |
-| **Share Kit** | Copy hub link, copy tracked per-platform links, downloadable QR code (PNG), embed code, and ready-to-paste post templates for X / Facebook / LinkedIn / WhatsApp |
+| **Share Kit** | Copy hub link, copy tracked per-platform links, downloadable QR code (PNG), embed code, and ready-to-paste post templates for X / Threads / Facebook / LinkedIn / WhatsApp |
 | **Platforms** | Connect/disconnect accounts, store default handles, see how UTMs are built |
 | **Settings** | Brand name, handle, accent colour, default UTM campaign/medium, reset to demo data |
 
@@ -34,7 +34,7 @@ The owner's real profiles are pre-configured (see `YOUTUBE_URL` / `TIKTOK_URL` /
 | LinkedIn | https://www.linkedin.com/company/145348282 |
 | TikTok | https://www.tiktok.com/@scenering.com |
 
-X and Website still use demo handles — update them in **Platforms** (or provide the URLs to be wired into the seed). Instagram and Spotify are intentionally left disconnected (owner will not add them); they remain available as platform options if needed later. Existing browsers with demo data are migrated automatically on load (only exact demo values are replaced; your own scenes/links are untouched).
+Twitch, Kick, Vimeo and Threads are enabled and ready for your channel/profile URLs (Spotify was removed in favour of video-focused platforms). X and Website still use demo handles — update them in **Platforms** (or provide the URLs to be wired into the seed). Instagram is intentionally left disconnected (available as a platform option if needed later). Existing browsers with demo data are migrated automatically on load (only exact demo values are replaced; your own scenes/links are untouched).
 
 ---
 

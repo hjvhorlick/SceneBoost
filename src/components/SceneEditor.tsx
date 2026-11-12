@@ -120,6 +120,17 @@ export default function SceneEditor({ scene, data, onBack, onSave, onDelete, onO
   }
 
   const usedPlatforms = new Set(draft.links.map((l) => l.platform))
+  const connectedIds = useMemo(
+    () => new Set(data.platforms.filter((p) => p.connected).map((p) => p.id)),
+    [data.platforms]
+  )
+  const orderedPlatforms = useMemo(
+    () =>
+      [...PLATFORMS].sort(
+        (a, b) => Number(connectedIds.has(b.id)) - Number(connectedIds.has(a.id))
+      ),
+    [connectedIds]
+  )
 
   return (
     <div className="page">
@@ -249,7 +260,7 @@ export default function SceneEditor({ scene, data, onBack, onSave, onDelete, onO
             </div>
 
             <div className="add-platforms">
-              {PLATFORMS.map((p) => (
+              {orderedPlatforms.map((p) => (
                 <button
                   key={p.id}
                   className={`add-platform ${usedPlatforms.has(p.id) ? 'used' : ''}`}

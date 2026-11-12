@@ -1,4 +1,5 @@
-import type { AppData, Scene, SceneLink } from '../types'
+import type { AppData, PlatformSettings, Scene, SceneLink } from '../types'
+import { PLATFORMS } from './platforms'
 import { uid } from './utils'
 
 const KEY = 'scenboost_data_v1'
@@ -19,6 +20,20 @@ const DEMO_URL_MIGRATION: Record<string, string> = {
   'https://tiktok.com/@sceneboost/video/studio-04': TIKTOK_URL,
   'https://tiktok.com/@sceneboost/video/summer-drop': TIKTOK_URL,
 }
+
+const DEFAULT_PLATFORMS: PlatformSettings[] = [
+  { id: 'youtube', connected: true, defaultHandle: YOUTUBE_URL },
+  { id: 'tiktok', connected: true, defaultHandle: TIKTOK_URL },
+  { id: 'facebook', connected: true, defaultHandle: FACEBOOK_URL },
+  { id: 'linkedin', connected: true, defaultHandle: LINKEDIN_URL },
+  { id: 'x', connected: true, defaultHandle: '@sceneboost' },
+  { id: 'twitch', connected: true, defaultHandle: '' },
+  { id: 'kick', connected: true, defaultHandle: '' },
+  { id: 'vimeo', connected: true, defaultHandle: '' },
+  { id: 'threads', connected: true, defaultHandle: '' },
+  { id: 'instagram', connected: false, defaultHandle: '' },
+  { id: 'website', connected: true, defaultHandle: 'shop.sceneboost.co' },
+]
 
 function seed(): AppData {
   const now = new Date()
@@ -51,8 +66,8 @@ function seed(): AppData {
       links: [
         mkLink('youtube', 'Watch on YouTube', YOUTUBE_URL, 4821, 0),
         mkLink('tiktok', 'Watch on TikTok', TIKTOK_URL, 3104, 1),
-        mkLink('x', 'Post the teaser', 'https://x.com/sceneboost/status/neon-nights', 940, 4),
-        mkLink('website', 'Get the vinyl — limited drop', 'https://shop.sceneboost.co/neon-nights', 612, 5),
+        mkLink('x', 'Post the teaser', 'https://x.com/sceneboost/status/neon-nights', 940, 2),
+        mkLink('website', 'Get the vinyl — limited drop', 'https://shop.sceneboost.co/neon-nights', 612, 3),
       ],
     },
     {
@@ -60,7 +75,7 @@ function seed(): AppData {
       title: 'Studio Sessions — Ep. 04: The Mix',
       slug: 'studio-sessions-ep-04',
       description:
-        'Inside the room where Neon Nights was mixed. Full episode on YouTube, highlights on TikTok and Instagram.',
+        'Inside the room where Neon Nights was mixed. Full episode on YouTube, highlights on TikTok, Facebook and LinkedIn.',
       thumbnail: 'ocean',
       videoUrl: YOUTUBE_URL,
       status: 'live',
@@ -70,8 +85,8 @@ function seed(): AppData {
       links: [
         mkLink('youtube', 'Watch on YouTube', YOUTUBE_URL, 1980, 0),
         mkLink('tiktok', 'Watch on TikTok', TIKTOK_URL, 1540, 1),
-        mkLink('facebook', 'Visit our Facebook', FACEBOOK_URL, 430, 3),
-        mkLink('linkedin', 'Visit our LinkedIn', LINKEDIN_URL, 210, 4),
+        mkLink('facebook', 'Visit our Facebook', FACEBOOK_URL, 430, 2),
+        mkLink('linkedin', 'Visit our LinkedIn', LINKEDIN_URL, 210, 3),
       ],
     },
     {
@@ -87,24 +102,15 @@ function seed(): AppData {
       createdAt: iso(1),
       updatedAt: iso(0, 1),
       links: [
-        mkLink('tiktok', 'Watch on TikTok', TIKTOK_URL, 0, 1),
-        mkLink('website', 'Join the waitlist', 'https://shop.sceneboost.co/waitlist', 0, 2),
+        mkLink('tiktok', 'Watch on TikTok', TIKTOK_URL, 0, 0),
+        mkLink('website', 'Join the waitlist', 'https://shop.sceneboost.co/waitlist', 0, 1),
       ],
     },
   ]
 
   return {
     scenes,
-    platforms: [
-      { id: 'youtube', connected: true, defaultHandle: YOUTUBE_URL },
-      { id: 'tiktok', connected: true, defaultHandle: TIKTOK_URL },
-      { id: 'instagram', connected: false, defaultHandle: '' },
-      { id: 'facebook', connected: true, defaultHandle: FACEBOOK_URL },
-      { id: 'x', connected: true, defaultHandle: '@sceneboost' },
-      { id: 'linkedin', connected: true, defaultHandle: LINKEDIN_URL },
-      { id: 'spotify', connected: false, defaultHandle: '' },
-      { id: 'website', connected: true, defaultHandle: 'shop.sceneboost.co' },
-    ],
+    platforms: DEFAULT_PLATFORMS.map((p) => ({ ...p })),
     settings: {
       brandName: 'SceneBoost',
       handle: '@sceneboost',
@@ -112,24 +118,24 @@ function seed(): AppData {
       defaultMedium: 'social',
       accent: '#D4FF3F',
     },
-    totalClicks: 18593,
+    totalClicks: 13637,
     activity: [
       { id: uid(), text: 'YouTube link for “Neon Nights” passed 4,800 clicks', time: iso(0, 2), kind: 'click' },
       { id: uid(), text: 'New scene created: “Summer Drop — Teaser Campaign”', time: iso(1), kind: 'scene' },
       { id: uid(), text: 'TikTok link added to “Studio Sessions — Ep. 04”', time: iso(1, 6), kind: 'link' },
-      { id: uid(), text: 'Spotify link for “Neon Nights” passed 1,800 clicks', time: iso(2), kind: 'click' },
+      { id: uid(), text: 'TikTok link for “Neon Nights” passed 3,100 clicks', time: iso(2), kind: 'click' },
     ],
   }
 }
 
 /**
- * One-time migration: browsers that already loaded the demo seed get the
- * owner's real YouTube / TikTok / Facebook / LinkedIn profiles (Instagram/Spotify
- * left disconnected per owner) without losing any
- * scenes or clicks they created. Only exact demo values are replaced —
- * user-customised handles and links are left untouched.
+ * One-time migration: browsers that already loaded an earlier seed get the
+ * owner's real YouTube / TikTok / Facebook / LinkedIn profiles, have Spotify
+ * removed and replaced by video platforms (Twitch, Kick, Vimeo, Threads), and
+ * keep Instagram disconnected — without losing user-created scenes or clicks.
  */
 function migrateDemoProfiles(data: AppData): AppData {
+  const validIds = new Set<string>(PLATFORMS.map((p) => p.id))
   const demoHandles: Record<string, string> = {
     youtube: YOUTUBE_URL,
     tiktok: TIKTOK_URL,
@@ -138,35 +144,62 @@ function migrateDemoProfiles(data: AppData): AppData {
   }
   const demoHandleValues = new Set(['@sceneboost', 'SceneBoost', ''])
 
-  const platforms = data.platforms.map((p) => {
-    // Owner will not add Instagram/Spotify — leave them disconnected.
-    if ((p.id === 'instagram' || p.id === 'spotify') && demoHandleValues.has(p.defaultHandle)) {
-      return { ...p, connected: false, defaultHandle: '' }
+  const existingById = new Map<string, PlatformSettings>()
+  for (const p of data.platforms ?? []) {
+    if (!validIds.has(p.id as string)) continue // drops removed platforms like spotify
+    if (p.id === 'instagram' && demoHandleValues.has(p.defaultHandle)) {
+      existingById.set(p.id, { ...p, connected: false, defaultHandle: '' })
+      continue
     }
     const replacement = demoHandles[p.id]
-    if (!replacement) return p
-    if (p.id === 'linkedin') {
-      return demoHandleValues.has(p.defaultHandle) || !p.connected
-        ? { ...p, connected: true, defaultHandle: replacement }
-        : p
+    if (!replacement) {
+      existingById.set(p.id, p)
+      continue
     }
-    return demoHandleValues.has(p.defaultHandle) ? { ...p, defaultHandle: replacement } : p
-  })
+    if (p.id === 'linkedin') {
+      existingById.set(
+        p.id,
+        demoHandleValues.has(p.defaultHandle) || !p.connected
+          ? { ...p, connected: true, defaultHandle: replacement }
+          : p
+      )
+      continue
+    }
+    existingById.set(
+      p.id,
+      demoHandleValues.has(p.defaultHandle) ? { ...p, defaultHandle: replacement } : p
+    )
+  }
+
+  // Ensure all current PLATFORMS exist in canonical order (adds Twitch, Kick, Vimeo, Threads).
+  const platforms: PlatformSettings[] = DEFAULT_PLATFORMS.map(
+    (def) => existingById.get(def.id) ?? { ...def }
+  )
 
   const scenes = data.scenes.map((scene) => ({
     ...scene,
     videoUrl: DEMO_URL_MIGRATION[scene.videoUrl] ?? scene.videoUrl,
-    links: scene.links.map((link) => {
-      const url = DEMO_URL_MIGRATION[link.url] ?? link.url
-      // Hide demo Instagram/Spotify links (owner will not add them).
-      const isDemoIgSpotify =
-        (link.platform === 'instagram' || link.platform === 'spotify') &&
-        url.toLowerCase().includes('sceneboost')
-      return isDemoIgSpotify ? { ...link, url, enabled: false } : { ...link, url }
-    }),
+    links: scene.links
+      .filter((link) => validIds.has(link.platform as string))
+      .map((link) => {
+        const url = DEMO_URL_MIGRATION[link.url] ?? link.url
+        const isDemoIg =
+          link.platform === 'instagram' &&
+          (url.toLowerCase().includes('sceneboost') ||
+            url === 'https://instagram.com/reel/neon-nights' ||
+            url === 'https://instagram.com/p/studio-04' ||
+            url === 'https://instagram.com/reel/summer-drop')
+        return isDemoIg ? { ...link, url, enabled: false } : { ...link, url }
+      }),
   }))
 
-  return { ...data, platforms, scenes }
+  const activity = (data.activity ?? []).map((item) =>
+    item.text === 'Spotify link for “Neon Nights” passed 1,800 clicks'
+      ? { ...item, text: 'TikTok link for “Neon Nights” passed 3,100 clicks' }
+      : item
+  )
+
+  return { ...data, platforms, scenes, activity }
 }
 
 export function loadData(): AppData {

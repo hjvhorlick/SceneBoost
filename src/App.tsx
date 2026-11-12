@@ -169,17 +169,27 @@ export default function App() {
   }, [])
 
   const togglePlatform = (id: PlatformId) => {
-    setData((d) => ({
-      ...d,
-      platforms: d.platforms.map((p) => (p.id === id ? { ...p, connected: !p.connected } : p)),
-    }))
+    setData((d) => {
+      const exists = d.platforms.some((p) => p.id === id)
+      return {
+        ...d,
+        platforms: exists
+          ? d.platforms.map((p) => (p.id === id ? { ...p, connected: !p.connected } : p))
+          : [...d.platforms, { id, connected: true, defaultHandle: '' }],
+      }
+    })
   }
 
   const setPlatformHandle = (id: PlatformId, handle: string) => {
-    setData((d) => ({
-      ...d,
-      platforms: d.platforms.map((p) => (p.id === id ? { ...p, defaultHandle: handle } : p)),
-    }))
+    setData((d) => {
+      const exists = d.platforms.some((p) => p.id === id)
+      return {
+        ...d,
+        platforms: exists
+          ? d.platforms.map((p) => (p.id === id ? { ...p, defaultHandle: handle } : p))
+          : [...d.platforms, { id, connected: true, defaultHandle: handle }],
+      }
+    })
   }
 
   // Public hub route takes over the whole screen

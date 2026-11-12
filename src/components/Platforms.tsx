@@ -62,7 +62,7 @@ export default function Platforms({ data, onToggle, onHandle, notify }: Props) {
                 <input
                   value={settings?.defaultHandle ?? ''}
                   onChange={(e) => onHandle(def.id, e.target.value)}
-                  placeholder={def.id === 'website' ? 'shop.yourbrand.com' : '@yourhandle'}
+                  placeholder={def.placeholder}
                   disabled={!connected}
                 />
               </label>
@@ -93,7 +93,7 @@ export default function Platforms({ data, onToggle, onHandle, notify }: Props) {
         <div className="how-grid">
           <div>
             <strong>utm_source</strong>
-            <p className="muted">The platform — e.g. <code>youtube</code>, <code>tiktok</code>, <code>instagram</code>.</p>
+            <p className="muted">The platform — e.g. <code>youtube</code>, <code>tiktok</code>, <code>twitch</code>, <code>vimeo</code>.</p>
           </div>
           <div>
             <strong>utm_medium</strong>

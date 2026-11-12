@@ -15,7 +15,7 @@ export default function ShareKit({ data, notify }: Props) {
   const [selectedId, setSelectedId] = useState<string>(data.scenes[0]?.id ?? '')
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [copied, setCopied] = useState<string | null>(null)
-  const [templatePlatform, setTemplatePlatform] = useState<'x' | 'facebook' | 'linkedin' | 'whatsapp'>('x')
+  const [templatePlatform, setTemplatePlatform] = useState<'x' | 'threads' | 'facebook' | 'linkedin' | 'whatsapp'>('x')
 
   useEffect(() => {
     if (!selectedId && data.scenes[0]) setSelectedId(data.scenes[0].id)
@@ -63,8 +63,9 @@ export default function ShareKit({ data, notify }: Props) {
 
   const postTemplate = (platform: typeof templatePlatform) => {
     if (!scene) return ''
-    const base = `🎬 ${scene.title}\n\n${scene.description}\n\nWatch / listen / shop everywhere 👇\n${hub}`
+    const base = `🎬 ${scene.title}\n\n${scene.description}\n\nWatch / stream / share everywhere 👇\n${hub}`
     if (platform === 'x') return `${base}\n\n#SceneBoost #${scene.slug.replace(/-/g, '')}`
+    if (platform === 'threads') return `${base}\n\nDrop your favourite moment in the replies 👇`
     if (platform === 'facebook') return `${base}\n\nTap your favourite platform and share the scene you loved most.`
     if (platform === 'linkedin') return `${scene.title} — now live across every platform.\n\n${scene.description}\n\nOne link, every platform: ${hub}`
     return `${base}\n\nForward this to anyone who needs to see this scene!`
@@ -198,6 +199,7 @@ export default function ShareKit({ data, notify }: Props) {
             {(
               [
                 ['x', 'X'],
+                ['threads', 'Threads'],
                 ['facebook', 'Facebook'],
                 ['linkedin', 'LinkedIn'],
                 ['whatsapp', 'WhatsApp'],
