@@ -671,6 +671,27 @@ code {
 .yt-copy-block {
   margin-bottom: 14px;
 }
+.four-item-box {
+  padding: 14px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+}
+.four-item-box.thumb-missing-box {
+  border-color: rgba(255, 176, 58, 0.45);
+}
+.four-item-box.drag-over {
+  border-color: var(--accent);
+  background: rgba(212, 255, 63, 0.05);
+}
+.gemini-key-inline {
+  padding: 12px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid rgba(212, 255, 63, 0.35);
+}
 .yt-copy-head {
   display: flex;
   align-items: center;

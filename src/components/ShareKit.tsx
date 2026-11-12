@@ -9,6 +9,7 @@ import {
   Youtube,
   Share2,
   Edit3,
+  Sparkles,
 } from 'lucide-react'
 import type { AppData, Scene } from '../types'
 import { copyText, hubUrl } from '../lib/utils'
@@ -19,10 +20,13 @@ import {
   buildYoutubeStudioPack,
   buildSocialBoostPost,
   downloadYoutubeThumbnail,
+  extractTopDescription,
+  formatFileSize,
   isSpecificYoutubeVideoUrl,
   resolveYoutubeBoostUrl,
   type SocialBoostPlatform,
 } from '../lib/scenering'
+import { generateSeoTagsWithGemini, loadGeminiApiKey } from '../lib/gemini'
 import { Badge, EmptyState } from './ui'
 
 interface Props {
@@ -38,7 +42,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [copied, setCopied] = useState<string | null>(null)
   const [boostPlatform, setBoostPlatform] = useState<SocialBoostPlatform>('facebook')
-  const [includeCredits, setIncludeCredits] = useState(false)
+  const [geminiBusy, setGeminiBusy] = useState(false)
 
   useEffect(() => {
     if (!selectedId && data.scenes[0]) setSelectedId(data.scenes[0].id)
@@ -54,10 +58,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
     [scene, data.platforms]
   )
 
-  const ytPack = useMemo(
-    () => (scene ? buildYoutubeStudioPack(scene, data.platforms) : null),
-    [scene, data.platforms]
-  )
+  const ytPack = useMemo(() => (scene ? buildYoutubeStudioPack(scene) : null), [scene])
 
   const hub = scene ? hubUrl(scene.slug) : ''
   const qrUrl = qrTargetMode === 'youtube' ? ytBoostTarget.url : hub
@@ -118,21 +119,49 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
     })
   }
 
+  const handleAskGemini = async () => {
+    if (!scene || !onUpdateScene) return
+    const key = loadGeminiApiKey()
+    if (!key) {
+      notify('Add your Gemini API key in Settings or Scene Editor first')
+      if (onEditScene) onEditScene(scene.id)
+      return
+    }
+    setGeminiBusy(true)
+    try {
+      const seoTags = await generateSeoTagsWithGemini({
+        apiKey: key,
+        title: scene.title,
+        topDescription: extractTopDescription(scene.description, 300),
+      })
+      onUpdateScene({
+        ...scene,
+        tags: seoTags,
+        updatedAt: new Date().toISOString(),
+      })
+      notify(`Gemini generated ${seoTags.length} SEO-friendly tags ✓`)
+    } catch (err) {
+      notify(`Gemini error: ${err instanceof Error ? err.message : 'failed'}`)
+    } finally {
+      setGeminiBusy(false)
+    }
+  }
+
   if (!scene || !ytPack) {
     return (
       <div className="page">
         <div className="page-head">
           <div>
-            <h1>YouTube Boost &amp; Share Kit</h1>
+            <h1>Share Kit</h1>
             <p className="page-sub">
-              Publish to YouTube with full ranking SEO, then drive every social platform straight to your YouTube video.
+              The 4 YouTube items + platform-tailored social posts that play the video in YouTube.
             </p>
           </div>
         </div>
         <EmptyState
           icon={<QrCode size={28} />}
-          title="No videos to boost yet"
-          body="Create a scene from your Scenering folder first — then copy your YouTube SEO pack and social boost posts here."
+          title="No videos yet"
+          body="Import a Scenering folder first — then copy your 4 YouTube items and social posts here."
         />
       </div>
     )
@@ -140,17 +169,17 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
 
   const socialPost = buildSocialBoostPost(scene, boostPlatform, {
     platforms: data.platforms,
-    includeCredits,
   })
   const composerLink = PLATFORM_COMPOSER_LINKS[boostPlatform]
+  const hasRealThumbnail = scene.thumbnail.startsWith('data:image/')
 
   return (
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>YouTube Boost &amp; Share Kit</h1>
+          <h1>Share Kit</h1>
           <p className="page-sub">
-            1) Post to YouTube first with ranked SEO &amp; thumbnail → 2) Send every social post straight to YouTube to grow views &amp; monetize.
+            Upload the 4 items to YouTube first, then fetch each social post below — every post plays the video in YouTube.
           </p>
         </div>
         <div className="btn-row">
@@ -171,20 +200,20 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
               className="btn btn-ghost"
               onClick={() => onEditScene(scene.id)}
             >
-              <Edit3 size={14} /> Edit video &amp; thumbnail
+              <Edit3 size={14} /> Edit / Upload thumbnail
             </button>
           )}
         </div>
       </div>
 
-      {/* STEP 1 IN SHARE KIT: YOUTUBE STUDIO SEO PACK + THUMBNAIL */}
+      {/* THE 4 ITEMS FOR YOUTUBE */}
       <div className="share-grid">
         <div className="card yt-step-card">
           <div className="card-head">
             <div>
-              <div className="step-kicker yt-kicker">STEP 1 — POST TO YOUTUBE FIRST</div>
-              <h3>YouTube Ranking Pack (Title, Description, Tags &amp; Thumbnail)</h3>
-              <p>Paste these straight into YouTube Studio so your video ranks in search &amp; suggested feeds.</p>
+              <div className="step-kicker yt-kicker">YOUTUBE FIRST — THE 4 ITEMS</div>
+              <h3>YouTube Upload Items</h3>
+              <p>Ready for YouTube Studio alongside your channel’s predefined upload defaults.</p>
             </div>
             <a
               className="btn btn-ghost btn-sm"
@@ -198,11 +227,19 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
 
           <div className="yt-copy-block">
             <div className="yt-copy-head">
-              <strong>YouTube Title</strong>
+              <strong>
+                1. Video &amp; Title{' '}
+                {scene.videoFileName && (
+                  <span className="muted small">
+                    ({scene.videoFileName}
+                    {scene.videoSizeBytes ? ` · ${formatFileSize(scene.videoSizeBytes)}` : ''})
+                  </span>
+                )}
+              </strong>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() => void doCopy('yt-title', ytPack.title, 'YouTube title copied ✓')}
+                onClick={() => void doCopy('yt-title', ytPack.title, 'Title copied ✓')}
               >
                 {copied === 'yt-title' ? <Check size={13} /> : <Copy size={13} />} Copy title
               </button>
@@ -212,30 +249,46 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
 
           <div className="yt-copy-block">
             <div className="yt-copy-head">
-              <strong>YouTube Description + Credit Page</strong>
+              <strong>2. Top Description &amp; Credits</strong>
               <button
                 type="button"
                 className="btn btn-accent btn-sm"
                 onClick={() =>
-                  void doCopy('yt-desc', ytPack.description, 'YouTube description copied ✓')
+                  void doCopy(
+                    'yt-desc',
+                    ytPack.descriptionWithCredits,
+                    'Description + credits copied ✓'
+                  )
                 }
               >
-                {copied === 'yt-desc' ? <Check size={13} /> : <Copy size={13} />} Copy description
+                {copied === 'yt-desc' ? <Check size={13} /> : <Copy size={13} />} Copy description + credits
               </button>
             </div>
-            <pre className="code-block tall">{ytPack.description}</pre>
+            <pre className="code-block tall">{ytPack.descriptionWithCredits}</pre>
           </div>
 
           <div className="yt-copy-block">
             <div className="yt-copy-head">
-              <strong>YouTube Tags ({ytPack.tagsCharCount} / 500 chars)</strong>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => void doCopy('yt-tags', ytPack.tagsCsv, 'YouTube tags copied ✓')}
-              >
-                {copied === 'yt-tags' ? <Check size={13} /> : <Copy size={13} />} Copy tags
-              </button>
+              <strong>4. SEO-Friendly Tags ({ytPack.tagsCharCount} / 500 chars)</strong>
+              <div className="btn-row" style={{ gap: 6 }}>
+                {onUpdateScene && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={geminiBusy}
+                    onClick={() => void handleAskGemini()}
+                  >
+                    <Sparkles size={13} /> {geminiBusy ? 'Asking Gemini…' : 'Ask Gemini'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => void doCopy('yt-tags', ytPack.tagsCsv, 'SEO tags copied ✓')}
+                >
+                  {copied === 'yt-tags' ? <Check size={13} /> : <Copy size={13} />} Copy tags
+                </button>
+              </div>
             </div>
             <pre className="code-block">{ytPack.tagsCsv}</pre>
           </div>
@@ -243,16 +296,16 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
           <div className="divider" />
           <div className={`yt-live-url-box ${ytBoostTarget.isSpecificVideo ? 'ready' : 'pending'}`}>
             <div className="yt-copy-head" style={{ marginBottom: 6 }}>
-              <strong>Published YouTube Video Link</strong>
+              <strong>Published YouTube Video Link (plays in YouTube)</strong>
               <Badge tone={ytBoostTarget.isSpecificVideo ? 'live' : 'draft'}>
-                {ytBoostTarget.isSpecificVideo ? '✓ Live & Boosting' : 'Paste after YouTube upload'}
+                {ytBoostTarget.isSpecificVideo ? '✓ Linked' : 'Paste YouTube link'}
               </Badge>
             </div>
             {onUpdateScene ? (
               <input
                 value={scene.videoUrl}
                 onChange={(e) => handleQuickYoutubeUrl(e.target.value)}
-                placeholder="Paste https://youtu.be/… or https://www.youtube.com/watch?v=…"
+                placeholder="https://youtu.be/… or https://www.youtube.com/watch?v=…"
               />
             ) : (
               <div className="hub-link-box">
@@ -262,41 +315,50 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
           </div>
         </div>
 
-        {/* RIGHT COLUMN: THUMBNAIL + QR STRAIGHT TO YOUTUBE */}
+        {/* RIGHT COLUMN: ITEM 3 THUMBNAIL + QR */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card">
             <div className="card-head">
               <div>
-                <h3>1280×720 Thumbnail</h3>
-                <p>For YouTube Studio &amp; social teasers</p>
+                <h3>3. Thumbnail</h3>
+                <p>
+                  {hasRealThumbnail
+                    ? scene.thumbnailFileName || 'Fetched / uploaded thumbnail'
+                    : 'Not found in folder — upload in Editor'}
+                </p>
               </div>
+              <Badge tone={hasRealThumbnail ? 'live' : 'draft'}>
+                {hasRealThumbnail ? '✓ Ready' : 'Missing'}
+              </Badge>
             </div>
             <div
               className="thumb-preview-16x9"
               style={{ ...coverStyle(scene.thumbnail, 'swatch'), width: '100%', height: 164, marginBottom: 12 }}
             >
               <span className="thumb-res-badge">
-                {scene.thumbnail.startsWith('data:image/') ? '✓ Imported HD' : '16:9 Preset'}
+                {hasRealThumbnail ? '✓ 1280×720 HD' : 'Upload needed'}
               </span>
             </div>
             <div className="btn-row">
-              <button
-                type="button"
-                className="btn btn-accent btn-sm"
-                onClick={async () => {
-                  const ok = await downloadYoutubeThumbnail(scene.thumbnail, scene.slug)
-                  notify(ok ? 'Downloaded 1280×720 thumbnail (.jpg) ✓' : 'Could not export thumbnail')
-                }}
-              >
-                <Download size={14} /> Download 1280×720 (.jpg)
-              </button>
+              {hasRealThumbnail && (
+                <button
+                  type="button"
+                  className="btn btn-accent btn-sm"
+                  onClick={async () => {
+                    const ok = await downloadYoutubeThumbnail(scene.thumbnail, scene.slug)
+                    notify(ok ? 'Downloaded 1280×720 thumbnail (.jpg) ✓' : 'Could not export thumbnail')
+                  }}
+                >
+                  <Download size={14} /> Download 1280×720 (.jpg)
+                </button>
+              )}
               {onEditScene && (
                 <button
                   type="button"
-                  className="btn btn-ghost btn-sm"
+                  className={hasRealThumbnail ? 'btn btn-ghost btn-sm' : 'btn btn-accent btn-sm'}
                   onClick={() => onEditScene(scene.id)}
                 >
-                  Change thumbnail
+                  {hasRealThumbnail ? 'Replace thumbnail' : 'Upload thumbnail'}
                 </button>
               )}
             </div>
@@ -305,8 +367,8 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
           <div className="card">
             <div className="card-head">
               <div>
-                <h3>QR Code → YouTube</h3>
-                <p>Scans straight to your YouTube video</p>
+                <h3>QR Code</h3>
+                <p>Scans straight to YouTube</p>
               </div>
               <QrCode size={18} className="muted-icon" />
             </div>
@@ -316,14 +378,14 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
                 className={`filter-tab ${qrTargetMode === 'youtube' ? 'active' : ''}`}
                 onClick={() => setQrTargetMode('youtube')}
               >
-                Direct YouTube
+                Play in YouTube
               </button>
               <button
                 type="button"
                 className={`filter-tab ${qrTargetMode === 'hub' ? 'active' : ''}`}
                 onClick={() => setQrTargetMode('hub')}
               >
-                Backup Hub
+                SceneBoost Hub
               </button>
             </div>
             <div className="qr-box">
@@ -346,14 +408,14 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
         </div>
       </div>
 
-      {/* STEP 2 IN SHARE KIT: ALL OTHER SOCIAL POSTS -> STRAIGHT TO YOUTUBE */}
+      {/* OTHER SOCIAL POSTS FETCHED IN SCENEBOOST -> PLAYS IN YOUTUBE */}
       <div className="card boost-step-card">
         <div className="card-head">
           <div>
-            <div className="step-kicker boost-kicker">STEP 2 — SEND EVERY SOCIAL PLATFORM STRAIGHT TO YOUTUBE</div>
-            <h3>Social Boost Posts (Facebook, LinkedIn, TikTok, X, Threads &amp; more)</h3>
+            <div className="step-kicker boost-kicker">FETCH SOCIAL POSTS — PLAYS IN YOUTUBE</div>
+            <h3>Other Social Posts (tailored per platform)</h3>
             <p>
-              Every post uses your short description and sends viewers directly to <code>{ytBoostTarget.url}</code> so they watch on YouTube, discover more videos on your channel, and boost rankings &amp; monetization.
+              Uses only the top part of the description and links straight to <code>{ytBoostTarget.url}</code> so every viewer plays the video in YouTube.
             </p>
           </div>
           <Share2 size={18} className="muted-icon" />
@@ -372,17 +434,6 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
           ))}
         </div>
 
-        {scene.credits?.trim() && (boostPlatform === 'facebook' || boostPlatform === 'vimeo') && (
-          <label className="inline-check" style={{ marginBottom: 10 }}>
-            <input
-              type="checkbox"
-              checked={includeCredits}
-              onChange={(e) => setIncludeCredits(e.target.checked)}
-            />
-            <span>Append Scenering media credits</span>
-          </label>
-        )}
-
         <pre className="code-block tall">{socialPost}</pre>
 
         <div className="btn-row">
@@ -397,7 +448,8 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
               )
             }
           >
-            {copied === `boost-${boostPlatform}` ? <Check size={14} /> : <Copy size={14} />} Copy post → YouTube
+            {copied === `boost-${boostPlatform}` ? <Check size={14} /> : <Copy size={14} />} Copy{' '}
+            {SOCIAL_BOOST_PLATFORMS.find(([id]) => id === boostPlatform)?.[1]} post
           </button>
           <button
             type="button"

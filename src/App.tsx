@@ -155,6 +155,7 @@ export default function App() {
     const title = (newTitle.trim() || imported.title || 'Untitled scene').trim()
     const slugBase = slugify(title)
     const exists = data.scenes.some((s) => s.slug === slugBase)
+    const hasThumb = Boolean(newThumbDataUrl || imported.thumbnailFoundInFolder)
     const scene: Scene = {
       id: uid(),
       title,
@@ -163,8 +164,10 @@ export default function App() {
       tags: imported.tags,
       credits: imported.credits || undefined,
       videoFileName: imported.videoFileName || undefined,
+      videoSizeBytes: imported.videoSizeBytes || undefined,
       thumbnail: newThumbDataUrl || imported.thumbnailDataUrl || 'neon',
       thumbnailFileName: newThumbName || imported.thumbnailFileName || undefined,
+      thumbnailMissing: !hasThumb,
       videoUrl: '',
       status: 'draft',
       accent: data.settings.accent,
@@ -184,7 +187,11 @@ export default function App() {
     setNewTitle('')
     setNewThumbDataUrl('')
     setNewThumbName('')
-    notify('Imported credit page, SEO tags & thumbnail — ready to upload to YouTube first ✓')
+    notify(
+      hasThumb
+        ? 'Fetched video, credits, top description & thumbnail ✓'
+        : 'Fetched video & credits — upload a thumbnail in Item 3'
+    )
     navigate('editor', scene.id)
   }
 

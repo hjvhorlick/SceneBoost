@@ -2,11 +2,15 @@
 
 **YouTube-first video ranking & social boost studio.**
 
-SceneBoost is built around a **YouTube-first growth & monetization workflow**:
+SceneBoost is built around a **YouTube-first ranking & social boost workflow**:
 
-1. **Step 1 — Import your Scenering video folder, credit page & thumbnail**: Pulls the project title, short description, `📢 CREDITS & ATTRIBUTIONS`, SEO ranking tags (up to 500 chars), and a **1280×720 HD YouTube thumbnail** (via direct image import, drag-and-drop, Scenering folder auto-detection, or grabbing a frame directly from your rendered Scenering video).
-2. **Step 2 — Publish to YouTube first with full ranking SEO**: Copy your keyword-ranked Title, Description (short description in lines 1–2, `?sub_confirmation=1` subscribe & watch-more CTA, optional `scenering.com` website toggle, full credit page, and search hashtags), 500-character YouTube Studio Tags, and 1280×720 thumbnail straight into YouTube Studio — then paste your live YouTube video URL.
-3. **Step 3 — Boost YouTube from every other social platform**: Generate ready-to-post teasers for Facebook, LinkedIn, TikTok, X, Threads, Twitch/Kick, Vimeo and WhatsApp that send viewers **straight to your YouTube video**, where they find more of your videos, subscribe, and grow watch hours to rank and monetize your channel.
+1. **Fetch from your Scenering folder (`Videos/Scenering/<Video Name>`)**:
+   - **Video**: Detected in the folder with filename & size ready for YouTube Studio.
+   - **Credits & Top Part of Description**: Fetches `📢 CREDITS & ATTRIBUTIONS` and extracts **only the top part of the description**.
+   - **Thumbnail**: Automatically loaded if a thumbnail image is in the same folder; if none is in the folder, SceneBoost flags it and provides an **Upload thumbnail** option (`1280×720` HD).
+   - **SEO-Friendly Tags (with Gemini AI)**: Click **Ask Gemini for SEO tags** (using your Google Gemini API key stored locally in your browser) to generate strictly SEO-friendly search keywords and long-tail phrases (`<= 500` characters, zero filler/hashtags).
+2. **Upload ONLY the 4 items to YouTube first**: Since your YouTube Channel Settings already holds your predefined upload defaults, SceneBoost gives you just the 4 per-video items (Video/Title, Top Description + Credits, Thumbnail, and SEO Tags) — then paste your published YouTube video URL.
+3. **Fetch the other social posts in SceneBoost (video plays in YouTube)**: Generates native posts tailored for Facebook, LinkedIn, TikTok, X, Threads, Twitch/Kick, Vimeo and WhatsApp using **only the top part of the description** and your **YouTube video link** so every click plays the video directly **in YouTube**.
 
 ---
 

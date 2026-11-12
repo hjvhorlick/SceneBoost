@@ -28,12 +28,14 @@ export interface Scene {
   title: string
   slug: string
   description: string
-  tags?: string[] // YouTube SEO ranking tags (comma-separated <= 500 chars)
-  credits?: string // optional media attribution block from Scenering credits.txt
-  videoFileName?: string // optional rendered video file detected in Scenering folder
-  thumbnailFileName?: string // optional custom imported thumbnail filename
+  tags?: string[] // SEO-friendly YouTube tags (comma-separated <= 500 chars)
+  credits?: string // media attribution block fetched from Scenering credits file
+  videoFileName?: string // rendered video file fetched in Scenering folder
+  videoSizeBytes?: number // size of video file fetched in folder
+  thumbnailFileName?: string // thumbnail file fetched in folder or uploaded
+  thumbnailMissing?: boolean // true when folder import found no thumbnail image yet
   thumbnail: string // Scenering cover preset key or imported 1280x720 image data URL
-  videoUrl: string // Published YouTube video URL (primary boost destination)
+  videoUrl: string // Published YouTube video URL (plays the video in YouTube)
   status: SceneStatus
   accent: string // hex
   createdAt: string

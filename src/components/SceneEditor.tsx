@@ -16,9 +16,10 @@ import {
   ImagePlus,
   Download,
   Sparkles,
-  Film,
   Youtube,
   Share2,
+  KeyRound,
+  RefreshCw,
 } from 'lucide-react'
 import type { AppData, PlatformId, Scene, SceneLink } from '../types'
 import { PLATFORMS, COVER_THEMES, ACCENTS, coverStyle, platformById } from '../lib/platforms'
@@ -28,9 +29,10 @@ import {
   buildYoutubeStudioPack,
   buildSocialBoostPost,
   downloadYoutubeThumbnail,
+  extractTopDescription,
+  formatFileSize,
   formatYoutubeTagsCsv,
   generateYoutubeRankingTags,
-  grabVideoFrameToYoutubeThumbnail,
   isSpecificYoutubeVideoUrl,
   parseSceneringFiles,
   parseTagsInput,
@@ -38,6 +40,11 @@ import {
   resolveYoutubeBoostUrl,
   type SocialBoostPlatform,
 } from '../lib/scenering'
+import {
+  generateSeoTagsWithGemini,
+  loadGeminiApiKey,
+  saveGeminiApiKey,
+} from '../lib/gemini'
 import { buildTrackedUrl, copyText, hubUrl, slugify, uid } from '../lib/utils'
 import { Badge, PlatformPill } from './ui'
 
@@ -64,7 +71,6 @@ export default function SceneEditor({
   const [slugTouched, setSlugTouched] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
   const [boostPlatform, setBoostPlatform] = useState<SocialBoostPlatform>('facebook')
-  const [includeBoostCredits, setIncludeBoostCredits] = useState(false)
   const [tagsText, setTagsText] = useState<string>(() =>
     formatYoutubeTagsCsv(
       scene.tags && scene.tags.length > 0
@@ -72,31 +78,31 @@ export default function SceneEditor({
         : generateYoutubeRankingTags({
             title: scene.title,
             shortDescription: scene.description,
-            credits: scene.credits,
           })
     )
   )
-  const [importedVideoFile, setImportedVideoFile] = useState<File | null>(null)
   const [thumbDropActive, setThumbDropActive] = useState(false)
   const [showCoverPresets, setShowCoverPresets] = useState(false)
   const [showCreditsEditor, setShowCreditsEditor] = useState(false)
 
+  // Gemini SEO tags state
+  const [geminiKey, setGeminiKey] = useState<string>(() => loadGeminiApiKey())
+  const [showGeminiKeyBox, setShowGeminiKeyBox] = useState(false)
+  const [geminiBusy, setGeminiBusy] = useState(false)
+
   const folderInputRef = useRef<HTMLInputElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const thumbInputRef = useRef<HTMLInputElement | null>(null)
-  const videoFrameInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     setDraft(scene)
     setSlugTouched(false)
-    setImportedVideoFile(null)
     const initialTags =
       scene.tags && scene.tags.length > 0
         ? scene.tags
         : generateYoutubeRankingTags({
             title: scene.title,
             shortDescription: scene.description,
-            credits: scene.credits,
           })
     setTagsText(formatYoutubeTagsCsv(initialTags))
   }, [scene.id])
@@ -120,8 +126,8 @@ export default function SceneEditor({
     setTimeout(() => setCopied(null), 1800)
   }
 
-  // Import a custom YouTube/social thumbnail image (.jpg / .png / .webp) -> 1280x720 HD
-  const handleThumbnailFile = async (file: File | undefined) => {
+  // Upload thumbnail when not present in the folder (or when replacing)
+  const handleThumbnailUpload = async (file: File | undefined) => {
     if (!file) return
     try {
       const dataUrl = await renderImageFileToYoutubeThumbnail(file)
@@ -133,9 +139,10 @@ export default function SceneEditor({
         ...d,
         thumbnail: dataUrl,
         thumbnailFileName: file.name,
+        thumbnailMissing: false,
         updatedAt: new Date().toISOString(),
       }))
-      notify(`Thumbnail imported (1280×720 YouTube HD): ${file.name} ✓`)
+      notify(`Thumbnail uploaded (1280×720 HD): ${file.name} ✓`)
     } catch {
       notify('Could not read that image file — try PNG, JPG or WebP')
     }
@@ -146,54 +153,23 @@ export default function SceneEditor({
     setThumbDropActive(false)
     const file = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith('image/'))
     if (file) {
-      void handleThumbnailFile(file)
-      return
-    }
-    const vid = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith('video/'))
-    if (vid) {
-      setImportedVideoFile(vid)
-      void handleGrabFrameFromVideo(vid, 0.25)
-    }
-  }
-
-  const handleGrabFrameFromVideo = async (videoFile: File | undefined, ratio = 0.25) => {
-    if (!videoFile) return
-    try {
-      const dataUrl = await grabVideoFrameToYoutubeThumbnail(videoFile, ratio)
-      if (!dataUrl) {
-        notify('Could not grab frame from video')
-        return
-      }
-      setImportedVideoFile(videoFile)
-      setDraft((d) => ({
-        ...d,
-        thumbnail: dataUrl,
-        thumbnailFileName: `${videoFile.name.replace(/\.[^.]+$/, '')}-frame-${Math.round(ratio * 100)}pct.jpg`,
-        videoFileName: d.videoFileName || videoFile.name,
-        updatedAt: new Date().toISOString(),
-      }))
-      notify(`Grabbed 1280×720 thumbnail frame (${Math.round(ratio * 100)}%) ✓`)
-    } catch {
-      notify('Browser could not decode a frame from that video file')
+      void handleThumbnailUpload(file)
     }
   }
 
   const handleDownloadThumbnail = async () => {
-    const ok = await downloadYoutubeThumbnail(draft.thumbnail, draft.slug || 'scenering-video')
+    const ok = await downloadYoutubeThumbnail(draft.thumbnail, draft.slug || 'video')
     notify(
       ok
-        ? 'Downloaded 1280×720 YouTube thumbnail (.jpg) ✓'
-        : 'Could not export thumbnail — try importing an image first'
+        ? 'Downloaded 1280×720 thumbnail (.jpg) ✓'
+        : 'Upload a thumbnail image first'
     )
   }
 
-  // Import Scenering saved folder (`Videos/Scenering/<Video Name>`) or credit file
+  // Fetch video + credits + top part of description + thumbnail from Scenering folder
   const handleImportScenering = async (files: FileList | null) => {
     if (!files || files.length === 0) return
     const imported = await parseSceneringFiles(files)
-    if (imported.videoFile) {
-      setImportedVideoFile(imported.videoFile)
-    }
 
     setDraft((d) => {
       const shouldUpdateTitle =
@@ -201,54 +177,86 @@ export default function SceneEditor({
       const nextTitle = shouldUpdateTitle ? imported.title : d.title
       const nextSlug =
         shouldUpdateTitle && !slugTouched ? slugify(imported.title) : d.slug
-      const nextDesc = imported.shortDescription || d.description
+      const nextTopDesc = imported.shortDescription || extractTopDescription(d.description, 300)
       const nextCredits = imported.credits || d.credits
       const nextTags = generateYoutubeRankingTags({
         title: nextTitle,
-        shortDescription: nextDesc,
-        credits: nextCredits,
+        shortDescription: nextTopDesc,
         extraKeywords: imported.tags,
       })
       setTagsText(formatYoutubeTagsCsv(nextTags))
 
-      const hasCustomThumbAlready = d.thumbnail.startsWith('data:image/')
-      const nextThumb =
-        imported.thumbnailDataUrl || (hasCustomThumbAlready ? d.thumbnail : d.thumbnail)
-      const nextThumbName = imported.thumbnailFileName || d.thumbnailFileName
+      const hasUploadedThumbAlready = d.thumbnail.startsWith('data:image/')
+      const nextThumb = imported.thumbnailFoundInFolder
+        ? imported.thumbnailDataUrl
+        : d.thumbnail
+      const nextThumbName = imported.thumbnailFoundInFolder
+        ? imported.thumbnailFileName
+        : d.thumbnailFileName
+      const nextThumbMissing =
+        !imported.thumbnailFoundInFolder && !hasUploadedThumbAlready
 
       return {
         ...d,
         title: nextTitle,
         slug: nextSlug,
-        description: nextDesc,
+        description: nextTopDesc,
         credits: nextCredits,
         tags: nextTags,
         videoFileName: imported.videoFileName || d.videoFileName,
+        videoSizeBytes: imported.videoSizeBytes || d.videoSizeBytes,
         thumbnail: nextThumb,
         thumbnailFileName: nextThumbName,
+        thumbnailMissing: nextThumbMissing,
         updatedAt: new Date().toISOString(),
       }
     })
 
-    const parts: string[] = []
-    if (imported.title) parts.push('title')
-    if (imported.shortDescription) parts.push('short description')
-    if (imported.credits) parts.push('credits')
-    if (imported.thumbnailDataUrl) parts.push('1280×720 thumbnail')
-    parts.push('SEO tags')
-
-    notify(`Imported ${parts.join(', ')} from ${imported.sourceSummary} ✓`)
+    if (imported.thumbnailFoundInFolder) {
+      notify(`Fetched video, credits, top description & thumbnail (${imported.thumbnailFileName}) ✓`)
+    } else {
+      notify('Fetched video & credits — no thumbnail found in folder, upload one in Item 3 below')
+    }
   }
 
-  const handleRegenerateTags = () => {
-    const nextTags = generateYoutubeRankingTags({
+  // Generate SEO-friendly tags via Google Gemini
+  const handleGenerateGeminiTags = async () => {
+    const activeKey = geminiKey.trim() || loadGeminiApiKey()
+    if (!activeKey) {
+      setShowGeminiKeyBox(true)
+      notify('Enter your Gemini API key below to generate SEO tags with Gemini')
+      return
+    }
+    setGeminiBusy(true)
+    try {
+      saveGeminiApiKey(activeKey)
+      const topDesc = extractTopDescription(draft.description, 300)
+      const seoTags = await generateSeoTagsWithGemini({
+        apiKey: activeKey,
+        title: draft.title,
+        topDescription: topDesc,
+      })
+      setTagsText(formatYoutubeTagsCsv(seoTags))
+      set('tags', seoTags)
+      setShowGeminiKeyBox(false)
+      notify(`Gemini generated ${seoTags.length} SEO-friendly tags ✓`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gemini tag generation failed'
+      notify(`Gemini error: ${msg}`)
+      setShowGeminiKeyBox(true)
+    } finally {
+      setGeminiBusy(false)
+    }
+  }
+
+  const handleLocalSeoTags = () => {
+    const seoTags = generateYoutubeRankingTags({
       title: draft.title,
       shortDescription: draft.description,
-      credits: draft.credits,
     })
-    setTagsText(formatYoutubeTagsCsv(nextTags))
-    set('tags', nextTags)
-    notify('YouTube ranking tags regenerated from title, description & credits ✓')
+    setTagsText(formatYoutubeTagsCsv(seoTags))
+    set('tags', seoTags)
+    notify('SEO-friendly tags refreshed from title & top description ✓')
   }
 
   const handleTagsInputChange = (val: string) => {
@@ -257,7 +265,7 @@ export default function SceneEditor({
     set('tags', parsed)
   }
 
-  // Keep YouTube video URL synced with the scene's primary YouTube link
+  // Sync published YouTube video link -> plays the video IN YouTube across all social posts
   const handleYoutubeVideoUrlChange = (rawUrl: string) => {
     const url = rawUrl.trim()
     setDraft((d) => {
@@ -391,10 +399,7 @@ export default function SceneEditor({
     [draft.links, draft.slug, data.settings]
   )
 
-  const ytPack = useMemo(
-    () => buildYoutubeStudioPack(draft, data.platforms),
-    [draft, data.platforms]
-  )
+  const ytPack = useMemo(() => buildYoutubeStudioPack(draft), [draft])
 
   const ytBoostTarget = useMemo(
     () => resolveYoutubeBoostUrl(draft, data.platforms),
@@ -402,12 +407,8 @@ export default function SceneEditor({
   )
 
   const socialBoostText = useMemo(
-    () =>
-      buildSocialBoostPost(draft, boostPlatform, {
-        platforms: data.platforms,
-        includeCredits: includeBoostCredits,
-      }),
-    [draft, boostPlatform, data.platforms, includeBoostCredits]
+    () => buildSocialBoostPost(draft, boostPlatform, { platforms: data.platforms }),
+    [draft, boostPlatform, data.platforms]
   )
 
   const handleSave = () => {
@@ -418,7 +419,7 @@ export default function SceneEditor({
     const normalizedTags =
       draft.tags && draft.tags.length > 0 ? draft.tags : ytPack.tags
     onSave({ ...draft, tags: normalizedTags })
-    notify('Scene & YouTube Boost Kit saved ✓')
+    notify('Saved ✓')
   }
 
   const usedPlatforms = new Set(draft.links.map((l) => l.platform))
@@ -434,7 +435,8 @@ export default function SceneEditor({
     [connectedIds]
   )
 
-  const isCustomThumbnail = draft.thumbnail.startsWith('data:image/')
+  const hasRealThumbnail = draft.thumbnail.startsWith('data:image/')
+  const needsThumbnailUpload = Boolean(draft.thumbnailMissing) || !hasRealThumbnail
   const composerLink = PLATFORM_COMPOSER_LINKS[boostPlatform]
 
   return (
@@ -446,7 +448,7 @@ export default function SceneEditor({
           </button>
           <h1>{draft.title || 'Untitled scene'}</h1>
           <p className="page-sub">
-            Step 1: Import credit page &amp; thumbnail → Step 2: Rank on YouTube first → Step 3: Send all social traffic straight to YouTube.
+            Fetch from your Scenering folder → Post the 4 items to YouTube first → Fetch social posts here that play the video in YouTube.
           </p>
         </div>
         <div className="page-actions">
@@ -465,31 +467,34 @@ export default function SceneEditor({
       <div className="editor-grid">
         <div className="editor-main">
           {/* =========================================================
-              STEP 1 — IMPORT SCENERING CREDIT PAGE, TAGS & THUMBNAIL
+              FOLDER FETCH + THE 4 ITEMS FOR YOUTUBE
              ========================================================= */}
-          <div className="card">
+          <div className="card yt-step-card">
             <div className="card-head">
               <div>
-                <div className="step-kicker">STEP 1 OF 3 — PREPARE ASSETS</div>
-                <h3>Import Scenering credit page, SEO tags &amp; thumbnail</h3>
+                <div className="step-kicker yt-kicker">YOUTUBE FIRST — THE 4 ITEMS</div>
+                <h3>Fetch Scenering folder &amp; upload to YouTube</h3>
                 <p>
-                  Pulls your title, short description, media credits, ranking tags and 1280×720 thumbnail so YouTube ranks your video properly.
+                  Your YouTube Channel Settings already holds your predefined channel defaults — these 4 items are all YouTube needs for this video.
                 </p>
               </div>
-              <Badge tone={draft.status}>{draft.status}</Badge>
+              <a
+                className="btn btn-ghost btn-sm"
+                href="https://studio.youtube.com"
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Youtube size={15} color="#FF0033" /> Open YouTube Studio <ExternalLink size={12} />
+              </a>
             </div>
 
+            {/* FOLDER FETCHER */}
             <div className="scenering-import-bar">
               <div>
-                <strong>1A. Import Scenering saved folder or credit page</strong>
+                <strong>Fetch from Scenering saved folder</strong>
                 <p className="muted small">
-                  Select <code>Videos/Scenering/&lt;Video Name&gt;</code> (auto-reads <code>*_attribution_credits.txt</code>, video &amp; thumbnail).
+                  Select <code>Videos/Scenering/&lt;Video Name&gt;</code> — fetches the video, credits + top part of description, and thumbnail from the same folder.
                 </p>
-                {draft.videoFileName && (
-                  <p className="small" style={{ marginTop: 4, color: 'var(--accent)' }}>
-                    🎬 Video detected: <code>{draft.videoFileName}</code>
-                  </p>
-                )}
               </div>
               <div className="btn-row">
                 <input
@@ -519,21 +524,119 @@ export default function SceneEditor({
                   className="btn btn-accent btn-sm"
                   onClick={() => folderInputRef.current?.click()}
                 >
-                  <FolderOpen size={14} /> Import folder
+                  <FolderOpen size={14} /> Select Scenering folder
                 </button>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  <FileText size={14} /> Credit page (.txt)
+                  <FileText size={14} /> Credits (.txt)
                 </button>
               </div>
             </div>
 
-            {/* DEDICATED THUMBNAIL IMPORT & 1280x720 PREVIEW */}
+            {/* ITEM 1 — VIDEO & TITLE */}
+            <div className="four-item-box">
+              <div className="yt-copy-head">
+                <strong>1. Video (fetched in folder) &amp; Title</strong>
+                <div className="btn-row" style={{ gap: 8 }}>
+                  <span className="char-pill">{ytPack.title.length} / 100</span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => void doCopy('yt-title', ytPack.title, 'Video title')}
+                  >
+                    {copied === 'yt-title' ? <Check size={13} /> : <Copy size={13} />} Copy title
+                  </button>
+                </div>
+              </div>
+              {draft.videoFileName ? (
+                <p className="small" style={{ marginBottom: 8, color: 'var(--accent)' }}>
+                  ✓ Video in folder: <code>{draft.videoFileName}</code>
+                  {draft.videoSizeBytes ? ` (${formatFileSize(draft.videoSizeBytes)})` : ''} — upload this file in YouTube Studio
+                </p>
+              ) : (
+                <p className="muted small" style={{ marginBottom: 8 }}>
+                  Select your Scenering folder above to detect the rendered video file automatically.
+                </p>
+              )}
+              <input
+                value={draft.title}
+                onChange={(e) => set('title', e.target.value)}
+                placeholder="Video title…"
+              />
+            </div>
+
+            {/* ITEM 2 — TOP PART OF DESCRIPTION + CREDITS */}
+            <div className="four-item-box">
+              <div className="yt-copy-head">
+                <strong>2. Description (top part only) &amp; Credits</strong>
+                <div className="btn-row" style={{ gap: 8 }}>
+                  <span className="char-pill">{ytPack.descriptionWithCredits.length} / 5000</span>
+                  <button
+                    type="button"
+                    className="btn btn-accent btn-sm"
+                    onClick={() =>
+                      void doCopy(
+                        'yt-desc',
+                        ytPack.descriptionWithCredits,
+                        'YouTube description & credits'
+                      )
+                    }
+                  >
+                    {copied === 'yt-desc' ? <Check size={13} /> : <Copy size={13} />} Copy description + credits
+                  </button>
+                </div>
+              </div>
+
+              <label className="field" style={{ marginBottom: 10 }}>
+                <span className="muted small">
+                  Top part of description (used for YouTube &amp; all social posts)
+                </span>
+                <textarea
+                  rows={3}
+                  value={draft.description}
+                  onChange={(e) => set('description', e.target.value)}
+                  placeholder="Opening summary of the video (only this top part is used across social posts)…"
+                />
+              </label>
+
+              <div className="step1-toggles-row" style={{ marginBottom: 8 }}>
+                <span className="muted small">
+                  {draft.credits?.trim()
+                    ? '✓ Credits fetched from folder and attached below for YouTube'
+                    : 'No credits block loaded yet (import folder or paste below if needed)'}
+                </span>
+                <button
+                  type="button"
+                  className="link-toggle-btn"
+                  onClick={() => setShowCreditsEditor((v) => !v)}
+                >
+                  {showCreditsEditor ? 'Hide credits editor ▲' : 'View / edit fetched credits ▼'}
+                </button>
+              </div>
+
+              {showCreditsEditor && (
+                <textarea
+                  rows={5}
+                  style={{ marginBottom: 10 }}
+                  value={draft.credits ?? ''}
+                  onChange={(e) => set('credits', e.target.value)}
+                  placeholder="📢 CREDITS & ATTRIBUTIONS…"
+                />
+              )}
+
+              <pre className="code-block tall" style={{ marginBottom: 0 }}>
+                {ytPack.descriptionWithCredits}
+              </pre>
+            </div>
+
+            {/* ITEM 3 — THUMBNAIL (FROM SAME FOLDER OR UPLOAD IF MISSING) */}
             <div
-              className={`thumb-import-panel ${thumbDropActive ? 'drag-over' : ''}`}
+              className={`four-item-box ${thumbDropActive ? 'drag-over' : ''} ${
+                needsThumbnailUpload ? 'thumb-missing-box' : ''
+              }`}
               onDragOver={(e) => {
                 e.preventDefault()
                 setThumbDropActive(true)
@@ -541,319 +644,208 @@ export default function SceneEditor({
               onDragLeave={() => setThumbDropActive(false)}
               onDrop={handleThumbDrop}
             >
-              <div className="thumb-preview-16x9" style={coverStyle(draft.thumbnail, 'swatch')}>
-                <span className="thumb-res-badge">
-                  {isCustomThumbnail ? '✓ Imported 1280×720 HD' : '16:9 Cover Preset'}
-                </span>
+              <div className="yt-copy-head">
+                <strong>3. Thumbnail (from same folder, or upload if missing)</strong>
+                <Badge tone={hasRealThumbnail ? 'live' : 'draft'}>
+                  {hasRealThumbnail
+                    ? `✓ Ready (${draft.thumbnailFileName || '1280×720'})`
+                    : 'Upload needed'}
+                </Badge>
               </div>
 
-              <div className="thumb-import-controls">
-                <div>
-                  <strong>1B. YouTube &amp; Social Thumbnail (1280×720 HD)</strong>
-                  <p className="muted small">
-                    Import your custom thumbnail image (or drag &amp; drop it here), or grab a crisp frame straight from your Scenering video.
-                  </p>
-                  {draft.thumbnailFileName && (
-                    <p className="small" style={{ marginTop: 4, color: 'var(--accent)' }}>
-                      🖼️ Active thumbnail: <code>{draft.thumbnailFileName}</code>
+              <input
+                ref={thumbInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  void handleThumbnailUpload(e.target.files?.[0])
+                  e.target.value = ''
+                }}
+              />
+
+              <div className="thumb-import-panel" style={{ marginBottom: 0 }}>
+                <div className="thumb-preview-16x9" style={coverStyle(draft.thumbnail, 'swatch')}>
+                  <span className="thumb-res-badge">
+                    {hasRealThumbnail ? '✓ 1280×720 Thumbnail' : 'No folder thumbnail yet'}
+                  </span>
+                </div>
+
+                <div className="thumb-import-controls">
+                  {hasRealThumbnail ? (
+                    <p className="small" style={{ color: 'var(--accent)' }}>
+                      ✓ Thumbnail loaded: <code>{draft.thumbnailFileName || 'thumbnail.jpg'}</code>
+                    </p>
+                  ) : (
+                    <p className="small" style={{ color: '#FFB03A' }}>
+                      ⚠️ No thumbnail image was found in the folder — upload your thumbnail below (or drag &amp; drop it here).
                     </p>
                   )}
-                </div>
 
-                <input
-                  ref={thumbInputRef}
-                  type="file"
-                  accept="image/*"
-                  style={{ display: 'none' }}
-                  onChange={(e) => {
-                    void handleThumbnailFile(e.target.files?.[0])
-                    e.target.value = ''
-                  }}
-                />
-                <input
-                  ref={videoFrameInputRef}
-                  type="file"
-                  accept="video/mp4,video/webm,video/quicktime,video/*"
-                  style={{ display: 'none' }}
-                  onChange={(e) => {
-                    void handleGrabFrameFromVideo(e.target.files?.[0], 0.25)
-                    e.target.value = ''
-                  }}
-                />
+                  <div className="btn-row">
+                    <button
+                      type="button"
+                      className={hasRealThumbnail ? 'btn btn-ghost btn-sm' : 'btn btn-accent btn-sm'}
+                      onClick={() => thumbInputRef.current?.click()}
+                    >
+                      <ImagePlus size={14} />{' '}
+                      {hasRealThumbnail ? 'Replace thumbnail' : 'Upload thumbnail'}
+                    </button>
 
-                <div className="btn-row">
-                  <button
-                    type="button"
-                    className="btn btn-accent btn-sm"
-                    onClick={() => thumbInputRef.current?.click()}
-                  >
-                    <ImagePlus size={14} /> Import thumbnail image
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => {
-                      if (importedVideoFile) {
-                        void handleGrabFrameFromVideo(importedVideoFile, 0.35)
-                      } else {
-                        videoFrameInputRef.current?.click()
-                      }
-                    }}
-                  >
-                    <Film size={14} /> Grab frame from video
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={handleDownloadThumbnail}
-                  >
-                    <Download size={14} /> Download 1280×720 (.jpg)
-                  </button>
-                </div>
-
-                {importedVideoFile && (
-                  <div className="frame-seek-row">
-                    <span className="muted small">Pick frame point:</span>
-                    {[0.15, 0.35, 0.6, 0.8].map((pct) => (
+                    {hasRealThumbnail && (
                       <button
-                        key={pct}
                         type="button"
-                        className="chip"
-                        onClick={() => void handleGrabFrameFromVideo(importedVideoFile, pct)}
+                        className="btn btn-ghost btn-sm"
+                        onClick={handleDownloadThumbnail}
                       >
-                        {Math.round(pct * 100)}%
+                        <Download size={14} /> Download 1280×720 (.jpg)
                       </button>
-                    ))}
-                  </div>
-                )}
+                    )}
 
-                <div>
-                  <button
-                    type="button"
-                    className="link-toggle-btn"
-                    onClick={() => setShowCoverPresets((v) => !v)}
-                  >
-                    {showCoverPresets ? 'Hide Scenering cover themes ▲' : 'Or pick a Scenering studio cover theme ▼'}
-                  </button>
+                    <button
+                      type="button"
+                      className="link-toggle-btn"
+                      onClick={() => setShowCoverPresets((v) => !v)}
+                    >
+                      {showCoverPresets ? 'Hide hub presets ▲' : 'Hub cover presets ▼'}
+                    </button>
+                  </div>
+
+                  {showCoverPresets && (
+                    <div className="cover-themes-grid" style={{ marginTop: 6 }}>
+                      {COVER_THEMES.map((theme) => {
+                        const active = draft.thumbnail === theme.id
+                        return (
+                          <button
+                            key={theme.id}
+                            type="button"
+                            className={`cover-theme-card ${active ? 'active' : ''}`}
+                            style={coverStyle(theme.id, 'swatch')}
+                            onClick={() =>
+                              setDraft((d) => ({
+                                ...d,
+                                thumbnail: theme.id,
+                                thumbnailFileName: undefined,
+                                updatedAt: new Date().toISOString(),
+                              }))
+                            }
+                            title={theme.label}
+                          >
+                            <span className="cover-theme-check">{active && <Check size={13} />}</span>
+                            <span className="cover-theme-label">{theme.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
-
-                {showCoverPresets && (
-                  <div className="cover-themes-grid" style={{ marginTop: 8 }}>
-                    {COVER_THEMES.map((theme) => {
-                      const active = draft.thumbnail === theme.id
-                      return (
-                        <button
-                          key={theme.id}
-                          type="button"
-                          className={`cover-theme-card ${active ? 'active' : ''}`}
-                          style={coverStyle(theme.id, 'swatch')}
-                          onClick={() => {
-                            setDraft((d) => ({
-                              ...d,
-                              thumbnail: theme.id,
-                              thumbnailFileName: undefined,
-                              updatedAt: new Date().toISOString(),
-                            }))
-                          }}
-                          title={theme.label}
-                        >
-                          <span className="cover-theme-check">{active && <Check size={13} />}</span>
-                          <span className="cover-theme-label">{theme.label}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
               </div>
             </div>
 
-            <label className="field">
-              <span>Video Title (used for YouTube ranking &amp; social hooks)</span>
-              <input
-                value={draft.title}
-                onChange={(e) => set('title', e.target.value)}
-                placeholder="e.g. How Ancient Rome Built an Unstoppable Empire"
-              />
-            </label>
-
-            <label className="field">
-              <span>Short description (from credit page — placed in lines 1–2 of YouTube &amp; every social post)</span>
-              <textarea
-                rows={3}
-                value={draft.description}
-                onChange={(e) => set('description', e.target.value)}
-                placeholder="Write a clear 1–3 sentence summary with your main search keywords — YouTube weighs the first 2 lines heavily for search ranking…"
-              />
-            </label>
-
-            <div className="field">
-              <div className="field-label-row">
-                <span>YouTube SEO ranking tags (comma-separated, max 500 chars)</span>
+            {/* ITEM 4 — SEO-FRIENDLY TAGS WITH GEMINI OPTION */}
+            <div className="four-item-box">
+              <div className="yt-copy-head">
+                <strong>4. SEO-Friendly Tags (Gemini AI)</strong>
                 <div className="btn-row" style={{ gap: 8 }}>
                   <span className="char-pill">{ytPack.tagsCharCount} / 500 chars</span>
                   <button
                     type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={handleRegenerateTags}
-                  >
-                    <Sparkles size={13} /> Auto-generate tags
-                  </button>
-                </div>
-              </div>
-              <textarea
-                rows={2}
-                value={tagsText}
-                onChange={(e) => handleTagsInputChange(e.target.value)}
-                placeholder="keyword 1, keyword phrase 2, scenering…"
-              />
-            </div>
-
-            {/* Website per-video switch + Credit Page text toggle */}
-            <div className="step1-toggles-row">
-              <label className="inline-check">
-                <input
-                  type="checkbox"
-                  checked={websiteEnabled}
-                  onChange={(e) => handleToggleWebsiteForPost(e.target.checked)}
-                />
-                <span>
-                  Include Website link (<code>scenering.com</code>) on this video (switch off when not posted to website)
-                </span>
-              </label>
-
-              <button
-                type="button"
-                className="link-toggle-btn"
-                onClick={() => setShowCreditsEditor((v) => !v)}
-              >
-                {showCreditsEditor
-                  ? 'Hide credit page text ▲'
-                  : draft.credits?.trim()
-                  ? '✓ Credit page loaded — view / edit ▼'
-                  : '+ Paste or edit credit page text ▼'}
-              </button>
-            </div>
-
-            {showCreditsEditor && (
-              <label className="field" style={{ marginTop: 10 }}>
-                <span>Scenering Credit Page (<code>📢 CREDITS &amp; ATTRIBUTIONS</code> — included in YouTube description)</span>
-                <textarea
-                  rows={6}
-                  value={draft.credits ?? ''}
-                  onChange={(e) => set('credits', e.target.value)}
-                  placeholder="Paste or import your *_attribution_credits.txt block here…"
-                />
-              </label>
-            )}
-          </div>
-
-          {/* =========================================================
-              STEP 2 — POST TO YOUTUBE FIRST (SEO RANKING PACK)
-             ========================================================= */}
-          <div className="card yt-step-card">
-            <div className="card-head">
-              <div>
-                <div className="step-kicker yt-kicker">STEP 2 OF 3 — PUBLISH TO YOUTUBE FIRST</div>
-                <h3>YouTube Studio SEO Upload Pack</h3>
-                <p>
-                  Copy your ranked Title, Description + Credits, Tags and 1280×720 Thumbnail into YouTube Studio, then paste your live YouTube video link below.
-                </p>
-              </div>
-              <a
-                className="btn btn-ghost btn-sm"
-                href="https://studio.youtube.com"
-                target="_blank"
-                rel="noreferrer"
-              >
-                <Youtube size={15} color="#FF0033" /> Open YouTube Studio <ExternalLink size={12} />
-              </a>
-            </div>
-
-            {/* 1. YouTube Title */}
-            <div className="yt-copy-block">
-              <div className="yt-copy-head">
-                <strong>1. YouTube Title</strong>
-                <div className="btn-row" style={{ gap: 8 }}>
-                  <span className="char-pill">{ytPack.title.length} / 100</span>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => void doCopy('yt-title', ytPack.title, 'YouTube title')}
-                  >
-                    {copied === 'yt-title' ? <Check size={13} /> : <Copy size={13} />} Copy title
-                  </button>
-                </div>
-              </div>
-              <pre className="code-block">{ytPack.title}</pre>
-            </div>
-
-            {/* 2. YouTube Ranked Description + Credits */}
-            <div className="yt-copy-block">
-              <div className="yt-copy-head">
-                <strong>2. YouTube Description (Short Description + Subscribe CTA + Credit Page + Hashtags)</strong>
-                <div className="btn-row" style={{ gap: 8 }}>
-                  <span className="char-pill">{ytPack.description.length} / 5000</span>
-                  <button
-                    type="button"
                     className="btn btn-accent btn-sm"
-                    onClick={() => void doCopy('yt-desc', ytPack.description, 'YouTube description')}
+                    disabled={geminiBusy}
+                    onClick={() => void handleGenerateGeminiTags()}
                   >
-                    {copied === 'yt-desc' ? <Check size={13} /> : <Copy size={13} />} Copy description
+                    <Sparkles size={13} />{' '}
+                    {geminiBusy ? 'Asking Gemini…' : 'Ask Gemini for SEO tags'}
                   </button>
-                </div>
-              </div>
-              <pre className="code-block tall">{ytPack.description}</pre>
-            </div>
-
-            {/* 3. YouTube Studio Tags */}
-            <div className="yt-copy-block">
-              <div className="yt-copy-head">
-                <strong>3. YouTube Studio Tags (paste into “Show more → Tags”)</strong>
-                <div className="btn-row" style={{ gap: 8 }}>
-                  <span className="char-pill">{ytPack.tagsCharCount} / 500</span>
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
-                    onClick={() => void doCopy('yt-tags', ytPack.tagsCsv, 'YouTube tags')}
+                    onClick={() => void doCopy('yt-tags', ytPack.tagsCsv, 'SEO tags')}
                   >
                     {copied === 'yt-tags' ? <Check size={13} /> : <Copy size={13} />} Copy tags
                   </button>
                 </div>
               </div>
-              <pre className="code-block">{ytPack.tagsCsv}</pre>
-            </div>
 
-            {/* 4. YouTube Thumbnail quick download */}
-            <div className="yt-thumb-reminder">
-              <div>
-                <strong>4. Upload your 1280×720 Thumbnail in YouTube Studio</strong>
-                <p className="muted small">
-                  {draft.thumbnailFileName
-                    ? `Ready: ${draft.thumbnailFileName}`
-                    : 'Download your 1280×720 HD thumbnail JPG below and upload it in YouTube Studio.'}
-                </p>
+              <p className="muted small" style={{ marginBottom: 8 }}>
+                Uses strictly SEO-friendly search keywords &amp; long-tail phrases (no hashtags or filler). Paste directly into YouTube Studio → <em>Show more → Tags</em>.
+              </p>
+
+              {showGeminiKeyBox && (
+                <div className="gemini-key-inline">
+                  <div className="yt-copy-head" style={{ marginBottom: 6 }}>
+                    <span>
+                      <KeyRound size={13} style={{ verticalAlign: -2, marginRight: 6 }} />
+                      <strong>Google Gemini API Key</strong>{' '}
+                      <span className="muted small">(saved locally in this browser)</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="link-toggle-btn"
+                      onClick={() => setShowGeminiKeyBox(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <div className="btn-row">
+                    <input
+                      type="password"
+                      style={{ flex: 1 }}
+                      value={geminiKey}
+                      onChange={(e) => setGeminiKey(e.target.value)}
+                      placeholder="AIzaSy… (from Google AI Studio)"
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-accent btn-sm"
+                      disabled={geminiBusy || !geminiKey.trim()}
+                      onClick={() => void handleGenerateGeminiTags()}
+                    >
+                      <Sparkles size={13} /> Save &amp; generate
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <textarea
+                rows={2}
+                value={tagsText}
+                onChange={(e) => handleTagsInputChange(e.target.value)}
+                placeholder="seo keyword 1, long tail search phrase 2…"
+              />
+
+              <div className="step1-toggles-row" style={{ marginTop: 6 }}>
+                <button
+                  type="button"
+                  className="link-toggle-btn"
+                  onClick={handleLocalSeoTags}
+                >
+                  <RefreshCw size={11} style={{ verticalAlign: -1, marginRight: 4 }} />
+                  Quick refresh from title &amp; description
+                </button>
+                <button
+                  type="button"
+                  className="link-toggle-btn"
+                  onClick={() => setShowGeminiKeyBox((v) => !v)}
+                >
+                  <KeyRound size={11} style={{ verticalAlign: -1, marginRight: 4 }} />
+                  {geminiKey ? 'Update Gemini API key' : 'Set Gemini API key'}
+                </button>
               </div>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={handleDownloadThumbnail}
-              >
-                <Download size={14} /> Download 1280×720 Thumbnail
-              </button>
             </div>
 
             <div className="divider" />
 
-            {/* 5. PASTE PUBLISHED YOUTUBE URL */}
+            {/* PASTE PUBLISHED YOUTUBE LINK */}
             <div className={`yt-live-url-box ${ytBoostTarget.isSpecificVideo ? 'ready' : 'pending'}`}>
               <div className="yt-copy-head" style={{ marginBottom: 6 }}>
-                <strong>5. Paste your published YouTube video link here once uploaded</strong>
+                <strong>Once YouTube is published — paste the YouTube video link here</strong>
                 <Badge tone={ytBoostTarget.isSpecificVideo ? 'live' : 'draft'}>
-                  {ytBoostTarget.isSpecificVideo ? '✓ YouTube Video Linked' : 'Waiting for YouTube URL'}
+                  {ytBoostTarget.isSpecificVideo ? '✓ Plays in YouTube' : 'Waiting for YouTube link'}
                 </Badge>
               </div>
               <p className="muted small" style={{ marginBottom: 8 }}>
-                Every social post in Step 3 will automatically send viewers straight to this YouTube video so your views, watch hours and subscribers grow on YouTube.
+                Every social post fetched from SceneBoost below will use this YouTube link to play the video in YouTube.
               </p>
               <input
                 value={draft.videoUrl}
@@ -864,15 +856,15 @@ export default function SceneEditor({
           </div>
 
           {/* =========================================================
-              STEP 3 — SOCIAL BOOST POSTS STRAIGHT TO YOUTUBE
+              OTHER SOCIAL POSTS — FETCHED IN SCENEBOOST, PLAYS IN YOUTUBE
              ========================================================= */}
           <div className="card boost-step-card">
             <div className="card-head">
               <div>
-                <div className="step-kicker boost-kicker">STEP 3 OF 3 — BOOST YOUTUBE FROM SOCIALS</div>
-                <h3>Create social posts that send viewers straight to YouTube</h3>
+                <div className="step-kicker boost-kicker">OTHER SOCIAL POSTS — PLAYS IN YOUTUBE</div>
+                <h3>Fetch platform-ready social posts from SceneBoost</h3>
                 <p>
-                  Share on Facebook, LinkedIn, TikTok, X, Threads and more — every click goes directly to YouTube where viewers find more of your videos, boosting rankings &amp; channel monetization.
+                  Formatted the way each platform needs it — uses only the top part of your description, and uses your YouTube link to play the video in YouTube.
                 </p>
               </div>
               <Share2 size={18} className="muted-icon" />
@@ -881,14 +873,14 @@ export default function SceneEditor({
             <div className={`boost-target-banner ${ytBoostTarget.isSpecificVideo ? 'ok' : 'warn'}`}>
               {ytBoostTarget.isSpecificVideo ? (
                 <>
-                  <span>🎯 Direct YouTube destination:</span>{' '}
+                  <span>▶️ Video link in every post (plays in YouTube):</span>{' '}
                   <code>{ytBoostTarget.url}</code>
                 </>
               ) : (
                 <>
-                  <span>⚠️ Paste your specific YouTube video link in Step 2 above!</span>{' '}
+                  <span>⚠️ Paste your published YouTube video link above first</span>{' '}
                   <span className="muted small">
-                    (Currently pointing to your YouTube channel: <code>{ytBoostTarget.url}</code>)
+                    (currently falling back to channel: <code>{ytBoostTarget.url}</code>)
                   </span>
                 </>
               )}
@@ -907,17 +899,6 @@ export default function SceneEditor({
               ))}
             </div>
 
-            {draft.credits?.trim() && (boostPlatform === 'facebook' || boostPlatform === 'vimeo') && (
-              <label className="inline-check" style={{ marginBottom: 10 }}>
-                <input
-                  type="checkbox"
-                  checked={includeBoostCredits}
-                  onChange={(e) => setIncludeBoostCredits(e.target.checked)}
-                />
-                <span>Also append media credits to this {boostPlatform} post</span>
-              </label>
-            )}
-
             <pre className="code-block tall">{socialBoostText}</pre>
 
             <div className="btn-row">
@@ -928,19 +909,22 @@ export default function SceneEditor({
                   void doCopy(
                     `boost-${boostPlatform}`,
                     socialBoostText,
-                    `${SOCIAL_BOOST_PLATFORMS.find(([id]) => id === boostPlatform)?.[1] ?? 'Social'} boost post`
+                    `${SOCIAL_BOOST_PLATFORMS.find(([id]) => id === boostPlatform)?.[1] ?? 'Social'} post`
                   )
                 }
               >
-                {copied === `boost-${boostPlatform}` ? <Check size={14} /> : <Copy size={14} />} Copy post → YouTube
+                {copied === `boost-${boostPlatform}` ? <Check size={14} /> : <Copy size={14} />} Copy{' '}
+                {SOCIAL_BOOST_PLATFORMS.find(([id]) => id === boostPlatform)?.[1]} post
               </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={handleDownloadThumbnail}
-              >
-                <Download size={14} /> Download thumbnail (.jpg)
-              </button>
+              {hasRealThumbnail && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={handleDownloadThumbnail}
+                >
+                  <Download size={14} /> Download thumbnail (.jpg)
+                </button>
+              )}
               {composerLink && (
                 <a
                   className="btn btn-ghost btn-sm"
@@ -955,20 +939,31 @@ export default function SceneEditor({
           </div>
 
           {/* =========================================================
-              OPTIONAL: EXTRA HUB & CHANNEL SETTINGS
+              PER-VIDEO WEBSITE TOGGLE & OPTIONAL SCENEBOOST LINKS
              ========================================================= */}
           <div className="card">
             <div className="card-head">
               <div>
-                <h3>Optional Hub page &amp; extra links ({draft.links.length})</h3>
-                <p>Backup smart page (/s/{draft.slug}) — YouTube stays #1 at the top</p>
+                <h3>Channel &amp; Website links ({draft.links.length})</h3>
+                <p>Switch off Website when a video isn’t posted to scenering.com</p>
               </div>
               <Link2 size={18} className="muted-icon" />
             </div>
 
+            <label className="inline-check" style={{ marginBottom: 14 }}>
+              <input
+                type="checkbox"
+                checked={websiteEnabled}
+                onChange={(e) => handleToggleWebsiteForPost(e.target.checked)}
+              />
+              <span>
+                Include Website link (<code>scenering.com</code>) on this video’s SceneBoost hub
+              </span>
+            </label>
+
             <div className="field-row" style={{ marginBottom: 14 }}>
               <label className="field">
-                <span>Slug (hub URL)</span>
+                <span>Slug (SceneBoost URL)</span>
                 <div className="slug-input">
                   <span>/s/</span>
                   <input
@@ -1021,11 +1016,7 @@ export default function SceneEditor({
               </div>
             </div>
 
-            {draft.links.length === 0 ? (
-              <div className="empty-inline">
-                <p>Paste your YouTube URL in Step 2 above to auto-add YouTube, or click a platform chip.</p>
-              </div>
-            ) : (
+            {draft.links.length > 0 && (
               <div className="link-editor-list">
                 {[...draft.links]
                   .sort((a, b) => a.order - b.order)
@@ -1115,72 +1106,76 @@ export default function SceneEditor({
         </div>
 
         {/* =========================================================
-            SIDEBAR — YOUTUBE RANK & BOOST CHECKLIST + LIVE PREVIEW
+            SIDEBAR — THE 4 YOUTUBE ITEMS CHECKLIST + PREVIEW
            ========================================================= */}
         <aside className="editor-side">
           <div className="card sticky-card">
             <div className="card-head">
               <div>
-                <h3>YouTube Boost Checklist</h3>
-                <p>Rank &amp; monetize workflow</p>
+                <h3>The 4 YouTube Items</h3>
+                <p>Ready check before social boost</p>
               </div>
             </div>
 
             <div className="yt-checklist">
-              <div className={`yt-check-item ${draft.title.trim() && draft.description.trim() ? 'done' : ''}`}>
-                <span className="yt-check-dot">{draft.title.trim() && draft.description.trim() ? '✓' : '1'}</span>
+              <div className={`yt-check-item ${draft.videoFileName || draft.title.trim() ? 'done' : ''}`}>
+                <span className="yt-check-dot">{draft.videoFileName ? '✓' : '1'}</span>
                 <div>
-                  <strong>Title &amp; credit description</strong>
+                  <strong>1. Video in folder</strong>
                   <p className="muted small">
-                    {draft.description.trim() ? 'Short description ready for SEO' : 'Add or import short description'}
+                    {draft.videoFileName || 'Select Scenering folder to fetch video'}
                   </p>
                 </div>
               </div>
 
-              <div className={`yt-check-item ${isCustomThumbnail ? 'done' : ''}`}>
-                <span className="yt-check-dot">{isCustomThumbnail ? '✓' : '2'}</span>
+              <div className={`yt-check-item ${ytPack.topDescription ? 'done' : ''}`}>
+                <span className="yt-check-dot">{ytPack.topDescription ? '✓' : '2'}</span>
                 <div>
-                  <strong>1280×720 Thumbnail</strong>
+                  <strong>2. Top description &amp; credits</strong>
                   <p className="muted small">
-                    {isCustomThumbnail
-                      ? draft.thumbnailFileName || 'Custom HD thumbnail imported'
-                      : 'Import custom thumbnail or grab video frame'}
+                    {draft.credits?.trim()
+                      ? 'Top description + credits ready'
+                      : ytPack.topDescription
+                      ? 'Top description ready'
+                      : 'Fetch or enter opening summary'}
+                  </p>
+                </div>
+              </div>
+
+              <div className={`yt-check-item ${hasRealThumbnail ? 'done' : ''}`}>
+                <span className="yt-check-dot">{hasRealThumbnail ? '✓' : '3'}</span>
+                <div>
+                  <strong>3. Thumbnail</strong>
+                  <p className="muted small">
+                    {hasRealThumbnail
+                      ? draft.thumbnailFileName || 'Thumbnail ready'
+                      : 'Not in folder — upload in Item 3'}
                   </p>
                 </div>
               </div>
 
               <div className={`yt-check-item ${ytPack.tags.length >= 3 ? 'done' : ''}`}>
-                <span className="yt-check-dot">{ytPack.tags.length >= 3 ? '✓' : '3'}</span>
+                <span className="yt-check-dot">{ytPack.tags.length >= 3 ? '✓' : '4'}</span>
                 <div>
-                  <strong>Ranking tags ({ytPack.tagsCharCount}/500)</strong>
-                  <p className="muted small">{ytPack.tags.length} tags ready for YouTube Studio</p>
-                </div>
-              </div>
-
-              <div className={`yt-check-item ${ytBoostTarget.isSpecificVideo ? 'done' : ''}`}>
-                <span className="yt-check-dot">{ytBoostTarget.isSpecificVideo ? '✓' : '4'}</span>
-                <div>
-                  <strong>YouTube published &amp; linked</strong>
+                  <strong>4. SEO tags ({ytPack.tagsCharCount}/500)</strong>
                   <p className="muted small">
-                    {ytBoostTarget.isSpecificVideo
-                      ? 'All social posts point straight to YouTube!'
-                      : 'Paste live YouTube link in Step 2'}
+                    {ytPack.tags.length} SEO-friendly tags ready
                   </p>
                 </div>
               </div>
             </div>
 
             <div className="divider" />
-            <h4 className="section-label">Thumbnail &amp; video card preview</h4>
+            <h4 className="section-label">Plays in YouTube</h4>
             <div className="phone-preview">
               <div className="phone-hero" style={coverStyle(draft.thumbnail, 'hero')}>
                 <Badge tone={ytBoostTarget.isSpecificVideo ? 'live' : draft.status}>
-                  {ytBoostTarget.isSpecificVideo ? '▶ YouTube Live' : draft.status}
+                  {ytBoostTarget.isSpecificVideo ? '▶ Plays in YouTube' : draft.status}
                 </Badge>
                 <div className="phone-hero-title">{draft.title || 'Your video title'}</div>
               </div>
               <div className="phone-body">
-                <p>{draft.description || 'Your short description from the credit page appears here…'}</p>
+                <p>{ytPack.topDescription || 'Top part of your description appears here…'}</p>
                 <a
                   className="phone-link yt-primary-cta"
                   href={ytBoostTarget.url}
@@ -1188,12 +1183,12 @@ export default function SceneEditor({
                   rel="noreferrer"
                 >
                   <PlatformPill short="YT" color="#FF0033" bg="#FF003322" text="#FF6B81" />
-                  <span>Watch Full Video on YouTube</span>
+                  <span>Play Video in YouTube</span>
                   <ExternalLink size={13} />
                 </a>
               </div>
               <div className="phone-foot" style={{ color: draft.accent }}>
-                All social posts boost → YouTube
+                Social posts fetched in SceneBoost → Play in YouTube
               </div>
             </div>
 
@@ -1209,9 +1204,9 @@ export default function SceneEditor({
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() => void doCopy('hub', hubUrl(draft.slug), 'Backup hub link')}
+                onClick={() => void doCopy('hub', hubUrl(draft.slug), 'SceneBoost link')}
               >
-                {copied === 'hub' ? <Check size={14} /> : <Copy size={14} />} Copy hub URL
+                {copied === 'hub' ? <Check size={14} /> : <Copy size={14} />} Hub URL
               </button>
             </div>
           </div>

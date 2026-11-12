@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Save, RotateCcw, Zap } from 'lucide-react'
+import { Save, RotateCcw, Zap, Check, KeyRound } from 'lucide-react'
 import type { AppData, AppSettings } from '../types'
 import { ACCENTS } from '../lib/platforms'
-import { Check } from 'lucide-react'
+import { loadGeminiApiKey, saveGeminiApiKey } from '../lib/gemini'
 
 interface Props {
   data: AppData
@@ -13,6 +13,7 @@ interface Props {
 
 export default function Settings({ data, onSave, onReset, notify }: Props) {
   const [draft, setDraft] = useState<AppSettings>(data.settings)
+  const [geminiKey, setGeminiKey] = useState<string>(() => loadGeminiApiKey())
   const [confirmReset, setConfirmReset] = useState(false)
 
   const set = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
@@ -106,6 +107,35 @@ export default function Settings({ data, onSave, onReset, notify }: Props) {
               https://youtube.com/watch?v=…?utm_source=youtube&amp;utm_medium={draft.defaultMedium || 'social'}&amp;utm_campaign={draft.defaultCampaign || 'campaign'}&amp;utm_content=your-scene-slug
             </code>
           </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <h3>Gemini AI — SEO Tag Generator</h3>
+            <p>Used to generate strictly SEO-friendly YouTube tags from your video title &amp; top description (stored only in this browser).</p>
+          </div>
+          <KeyRound size={18} className="muted-icon" />
+        </div>
+        <div className="btn-row">
+          <input
+            type="password"
+            style={{ flex: 1 }}
+            value={geminiKey}
+            onChange={(e) => setGeminiKey(e.target.value)}
+            placeholder="AIzaSy… (Google AI Studio API key)"
+          />
+          <button
+            type="button"
+            className="btn btn-accent btn-sm"
+            onClick={() => {
+              saveGeminiApiKey(geminiKey)
+              notify(geminiKey.trim() ? 'Gemini API key saved ✓' : 'Gemini API key cleared')
+            }}
+          >
+            <Save size={14} /> Save Gemini key
+          </button>
         </div>
       </div>
 
