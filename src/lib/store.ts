@@ -9,6 +9,7 @@ export const YOUTUBE_URL = 'https://www.youtube.com/channel/UCV9v30xQPdbhwM5lAZC
 export const FACEBOOK_URL = 'https://www.facebook.com/profile.php?id=61595379711660'
 export const LINKEDIN_URL = 'https://www.linkedin.com/company/145348282'
 export const TIKTOK_URL = 'https://www.tiktok.com/@scenering.com'
+export const WEBSITE_URL = 'https://scenering.com'
 
 // Old demo link URLs -> real profile URLs (used for seed + one-time migration).
 const DEMO_URL_MIGRATION: Record<string, string> = {
@@ -19,6 +20,8 @@ const DEMO_URL_MIGRATION: Record<string, string> = {
   'https://tiktok.com/@sceneboost/video/neon-nights': TIKTOK_URL,
   'https://tiktok.com/@sceneboost/video/studio-04': TIKTOK_URL,
   'https://tiktok.com/@sceneboost/video/summer-drop': TIKTOK_URL,
+  'https://shop.sceneboost.co/neon-nights': WEBSITE_URL,
+  'https://shop.sceneboost.co/waitlist': WEBSITE_URL,
 }
 
 const DEFAULT_PLATFORMS: PlatformSettings[] = [
@@ -32,7 +35,7 @@ const DEFAULT_PLATFORMS: PlatformSettings[] = [
   { id: 'vimeo', connected: true, defaultHandle: '' },
   { id: 'threads', connected: true, defaultHandle: '' },
   { id: 'instagram', connected: false, defaultHandle: '' },
-  { id: 'website', connected: true, defaultHandle: 'shop.sceneboost.co' },
+  { id: 'website', connected: true, defaultHandle: WEBSITE_URL },
 ]
 
 function seed(): AppData {
@@ -67,7 +70,7 @@ function seed(): AppData {
         mkLink('youtube', 'Watch on YouTube', YOUTUBE_URL, 4821, 0),
         mkLink('tiktok', 'Watch on TikTok', TIKTOK_URL, 3104, 1),
         mkLink('x', 'Post the teaser', 'https://x.com/sceneboost/status/neon-nights', 940, 2),
-        mkLink('website', 'Get the vinyl — limited drop', 'https://shop.sceneboost.co/neon-nights', 612, 3),
+        mkLink('website', 'Visit Scenering', WEBSITE_URL, 612, 3),
       ],
     },
     {
@@ -103,7 +106,7 @@ function seed(): AppData {
       updatedAt: iso(0, 1),
       links: [
         mkLink('tiktok', 'Watch on TikTok', TIKTOK_URL, 0, 0),
-        mkLink('website', 'Join the waitlist', 'https://shop.sceneboost.co/waitlist', 0, 1),
+        mkLink('website', 'Visit Scenering', WEBSITE_URL, 0, 1),
       ],
     },
   ]
@@ -141,8 +144,9 @@ function migrateDemoProfiles(data: AppData): AppData {
     tiktok: TIKTOK_URL,
     facebook: FACEBOOK_URL,
     linkedin: LINKEDIN_URL,
+    website: WEBSITE_URL,
   }
-  const demoHandleValues = new Set(['@sceneboost', 'SceneBoost', ''])
+  const demoHandleValues = new Set(['@sceneboost', 'SceneBoost', 'shop.sceneboost.co', ''])
 
   const existingById = new Map<string, PlatformSettings>()
   for (const p of data.platforms ?? []) {
@@ -182,14 +186,21 @@ function migrateDemoProfiles(data: AppData): AppData {
     links: scene.links
       .filter((link) => validIds.has(link.platform as string))
       .map((link) => {
+        const wasDemoWebsite =
+          link.platform === 'website' && link.url in DEMO_URL_MIGRATION
         const url = DEMO_URL_MIGRATION[link.url] ?? link.url
+        const label =
+          wasDemoWebsite &&
+          (link.label === 'Get the vinyl — limited drop' || link.label === 'Join the waitlist')
+            ? 'Visit Scenering'
+            : link.label
         const isDemoIg =
           link.platform === 'instagram' &&
           (url.toLowerCase().includes('sceneboost') ||
             url === 'https://instagram.com/reel/neon-nights' ||
             url === 'https://instagram.com/p/studio-04' ||
             url === 'https://instagram.com/reel/summer-drop')
-        return isDemoIg ? { ...link, url, enabled: false } : { ...link, url }
+        return isDemoIg ? { ...link, url, label, enabled: false } : { ...link, url, label }
       }),
   }))
 

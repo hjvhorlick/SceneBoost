@@ -25,7 +25,7 @@ Data is persisted in the browser via `localStorage` (`scenboost_data_v1`) and se
 
 ### Configured profiles
 
-The owner's real profiles are pre-configured (see `YOUTUBE_URL` / `TIKTOK_URL` / `FACEBOOK_URL` / `LINKEDIN_URL` in `src/lib/store.ts`):
+The owner's real profiles are pre-configured (see `YOUTUBE_URL` / `TIKTOK_URL` / `FACEBOOK_URL` / `LINKEDIN_URL` / `WEBSITE_URL` in `src/lib/store.ts`):
 
 | Platform | URL |
 |---|---|
@@ -33,8 +33,9 @@ The owner's real profiles are pre-configured (see `YOUTUBE_URL` / `TIKTOK_URL` /
 | Facebook | https://www.facebook.com/profile.php?id=61595379711660 |
 | LinkedIn | https://www.linkedin.com/company/145348282 |
 | TikTok | https://www.tiktok.com/@scenering.com |
+| Website | https://scenering.com |
 
-Twitch, Kick, Vimeo and Threads are enabled and ready for your channel/profile URLs (Spotify was removed in favour of video-focused platforms). X and Website still use demo handles — update them in **Platforms** (or provide the URLs to be wired into the seed). Instagram is intentionally left disconnected (available as a platform option if needed later). Existing browsers with demo data are migrated automatically on load (only exact demo values are replaced; your own scenes/links are untouched).
+Twitch, Kick, Vimeo and Threads are enabled and ready for your channel/profile URLs (Spotify was removed in favour of video-focused platforms). X still uses a demo handle — update it in **Platforms** (or provide the URL to be wired into the seed). Instagram is intentionally left disconnected (available as a platform option if needed later). Existing browsers with demo data are migrated automatically on load (only exact demo values are replaced; your own scenes/links are untouched).
 
 ---
 
