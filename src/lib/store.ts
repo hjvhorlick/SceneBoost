@@ -3,6 +3,19 @@ import { uid } from './utils'
 
 const KEY = 'scenboost_data_v1'
 
+// Real profiles/pages provided by the owner (replaces demo @sceneboost handles).
+export const YOUTUBE_URL = 'https://www.youtube.com/channel/UCV9v30xQPdbhwM5lAZC2MRQ'
+export const FACEBOOK_URL = 'https://www.facebook.com/profile.php?id=61595379711660'
+export const LINKEDIN_URL = 'https://www.linkedin.com/company/145348282'
+
+// Old demo link URLs -> real profile URLs (used for seed + one-time migration).
+const DEMO_URL_MIGRATION: Record<string, string> = {
+  'https://youtube.com/watch?v=neon-nights': YOUTUBE_URL,
+  'https://youtube.com/watch?v=studio-sessions-04': YOUTUBE_URL,
+  'https://facebook.com/sceneboost/videos/studio-04': FACEBOOK_URL,
+  'https://linkedin.com/posts/sceneboost-studio-04': LINKEDIN_URL,
+}
+
 function seed(): AppData {
   const now = new Date()
   const iso = (daysAgo: number, hours = 0) => {
@@ -26,13 +39,13 @@ function seed(): AppData {
       description:
         'The official video is live. Watch it everywhere, share your favourite scene and tag @sceneboost — best fan edit wins a signed vinyl.',
       thumbnail: 'neon',
-      videoUrl: 'https://youtube.com/watch?v=neon-nights',
+      videoUrl: YOUTUBE_URL,
       status: 'live',
       accent: '#FF3D81',
       createdAt: iso(12),
       updatedAt: iso(0, 3),
       links: [
-        mkLink('youtube', 'Watch on YouTube', 'https://youtube.com/watch?v=neon-nights', 4821, 0),
+        mkLink('youtube', 'Watch on YouTube', YOUTUBE_URL, 4821, 0),
         mkLink('tiktok', 'Watch the TikTok cut', 'https://tiktok.com/@sceneboost/video/neon-nights', 3104, 1),
         mkLink('instagram', 'Reel — behind the scenes', 'https://instagram.com/reel/neon-nights', 2210, 2),
         mkLink('spotify', 'Stream the track', 'https://open.spotify.com/track/neon-nights', 1876, 3),
@@ -109,6 +122,43 @@ function seed(): AppData {
   }
 }
 
+/**
+ * One-time migration: browsers that already loaded the demo seed get the
+ * owner's real YouTube / Facebook / LinkedIn profiles without losing any
+ * scenes or clicks they created. Only exact demo values are replaced —
+ * user-customised handles and links are left untouched.
+ */
+function migrateDemoProfiles(data: AppData): AppData {
+  const demoHandles: Record<string, string> = {
+    youtube: YOUTUBE_URL,
+    facebook: FACEBOOK_URL,
+    linkedin: LINKEDIN_URL,
+  }
+  const demoHandleValues = new Set(['@sceneboost', 'SceneBoost', ''])
+
+  const platforms = data.platforms.map((p) => {
+    const replacement = demoHandles[p.id]
+    if (!replacement) return p
+    if (p.id === 'linkedin') {
+      return demoHandleValues.has(p.defaultHandle) || !p.connected
+        ? { ...p, connected: true, defaultHandle: replacement }
+        : p
+    }
+    return demoHandleValues.has(p.defaultHandle) ? { ...p, defaultHandle: replacement } : p
+  })
+
+  const scenes = data.scenes.map((scene) => ({
+    ...scene,
+    videoUrl: DEMO_URL_MIGRATION[scene.videoUrl] ?? scene.videoUrl,
+    links: scene.links.map((link) => ({
+      ...link,
+      url: DEMO_URL_MIGRATION[link.url] ?? link.url,
+    })),
+  }))
+
+  return { ...data, platforms, scenes }
+}
+
 export function loadData(): AppData {
   try {
     const raw = localStorage.getItem(KEY)
@@ -119,7 +169,9 @@ export function loadData(): AppData {
     }
     const parsed = JSON.parse(raw) as AppData
     if (!parsed.scenes) return seed()
-    return parsed
+    const migrated = migrateDemoProfiles(parsed)
+    localStorage.setItem(KEY, JSON.stringify(migrated))
+    return migrated
   } catch {
     return seed()
   }
