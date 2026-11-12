@@ -61,7 +61,7 @@ function seed(): AppData {
       description:
         'The official video is live. Watch it everywhere, share your favourite scene and tag @sceneboost — best fan edit wins a signed vinyl.',
       thumbnail: 'neon',
-      videoUrl: YOUTUBE_URL,
+      videoUrl: '',
       status: 'live',
       accent: '#FF3D81',
       createdAt: iso(12),
@@ -80,7 +80,7 @@ function seed(): AppData {
       description:
         'Inside the room where Neon Nights was mixed. Full episode on YouTube, highlights on TikTok, Facebook and LinkedIn.',
       thumbnail: 'ocean',
-      videoUrl: YOUTUBE_URL,
+      videoUrl: '',
       status: 'live',
       accent: '#00C9FF',
       createdAt: iso(6),
@@ -180,29 +180,34 @@ function migrateDemoProfiles(data: AppData): AppData {
     (def) => existingById.get(def.id) ?? { ...def }
   )
 
-  const scenes = data.scenes.map((scene) => ({
-    ...scene,
-    videoUrl: DEMO_URL_MIGRATION[scene.videoUrl] ?? scene.videoUrl,
-    links: scene.links
-      .filter((link) => validIds.has(link.platform as string))
-      .map((link) => {
-        const wasDemoWebsite =
-          link.platform === 'website' && link.url in DEMO_URL_MIGRATION
-        const url = DEMO_URL_MIGRATION[link.url] ?? link.url
-        const label =
-          wasDemoWebsite &&
-          (link.label === 'Get the vinyl — limited drop' || link.label === 'Join the waitlist')
-            ? 'Visit Scenering'
-            : link.label
-        const isDemoIg =
-          link.platform === 'instagram' &&
-          (url.toLowerCase().includes('sceneboost') ||
-            url === 'https://instagram.com/reel/neon-nights' ||
-            url === 'https://instagram.com/p/studio-04' ||
-            url === 'https://instagram.com/reel/summer-drop')
-        return isDemoIg ? { ...link, url, label, enabled: false } : { ...link, url, label }
-      }),
-  }))
+  const scenes = data.scenes.map((scene) => {
+    const migratedVideoUrl = DEMO_URL_MIGRATION[scene.videoUrl] ?? scene.videoUrl
+    // Each video has its own unique YouTube URL — never treat the generic channel homepage as a per-video URL
+    const cleanPerVideoUrl = migratedVideoUrl === YOUTUBE_URL ? '' : migratedVideoUrl
+    return {
+      ...scene,
+      videoUrl: cleanPerVideoUrl,
+      links: scene.links
+        .filter((link) => validIds.has(link.platform as string))
+        .map((link) => {
+          const wasDemoWebsite =
+            link.platform === 'website' && link.url in DEMO_URL_MIGRATION
+          const url = DEMO_URL_MIGRATION[link.url] ?? link.url
+          const label =
+            wasDemoWebsite &&
+            (link.label === 'Get the vinyl — limited drop' || link.label === 'Join the waitlist')
+              ? 'Visit Scenering'
+              : link.label
+          const isDemoIg =
+            link.platform === 'instagram' &&
+            (url.toLowerCase().includes('sceneboost') ||
+              url === 'https://instagram.com/reel/neon-nights' ||
+              url === 'https://instagram.com/p/studio-04' ||
+              url === 'https://instagram.com/reel/summer-drop')
+          return isDemoIg ? { ...link, url, label, enabled: false } : { ...link, url, label }
+        }),
+    }
+  })
 
   const activity = (data.activity ?? []).map((item) => {
     if (item.text === 'Spotify link for “Neon Nights” passed 1,800 clicks') {

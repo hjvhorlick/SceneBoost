@@ -3,6 +3,7 @@ import { Save, RotateCcw, Zap, Check, KeyRound } from 'lucide-react'
 import type { AppData, AppSettings } from '../types'
 import { ACCENTS } from '../lib/platforms'
 import { loadGeminiApiKey, saveGeminiApiKey } from '../lib/gemini'
+import { loadGoogleOAuthClientId, saveGoogleOAuthClientId } from '../lib/youtube'
 
 interface Props {
   data: AppData
@@ -14,6 +15,7 @@ interface Props {
 export default function Settings({ data, onSave, onReset, notify }: Props) {
   const [draft, setDraft] = useState<AppSettings>(data.settings)
   const [geminiKey, setGeminiKey] = useState<string>(() => loadGeminiApiKey())
+  const [oauthClientId, setOauthClientId] = useState<string>(() => loadGoogleOAuthClientId())
   const [confirmReset, setConfirmReset] = useState(false)
 
   const set = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
@@ -115,7 +117,7 @@ export default function Settings({ data, onSave, onReset, notify }: Props) {
           <div>
             <h3>Google API Key — Gemini SEO Tags &amp; Instant YouTube Sync</h3>
             <p>
-              Generates strictly SEO-friendly YouTube tags with Gemini and enables instant YouTube Data API v3 link fetching (stored only in this browser). Without a key, YouTube links still auto-fetch from your public channel feed.
+              Generates strictly SEO-friendly YouTube tags with Gemini and fetches each newly posted video’s own YouTube URL (`https://youtu.be/...`) as soon as it is created.
             </p>
           </div>
           <KeyRound size={18} className="muted-icon" />
@@ -126,17 +128,48 @@ export default function Settings({ data, onSave, onReset, notify }: Props) {
             style={{ flex: 1 }}
             value={geminiKey}
             onChange={(e) => setGeminiKey(e.target.value)}
-            placeholder="AIzaSy… (Google AI Studio API key)"
+            placeholder="AIzaSy… (Google AI Studio / YouTube Data API key)"
           />
           <button
             type="button"
             className="btn btn-accent btn-sm"
             onClick={() => {
               saveGeminiApiKey(geminiKey)
-              notify(geminiKey.trim() ? 'Gemini API key saved ✓' : 'Gemini API key cleared')
+              notify(geminiKey.trim() ? 'Google API key saved ✓' : 'Google API key cleared')
             }}
           >
-            <Save size={14} /> Save Gemini key
+            <Save size={14} /> Save API key
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <h3>1-Click YouTube Direct Upload (Optional OAuth Client ID)</h3>
+            <p>
+              Optional: add a Google Cloud Web OAuth Client ID (`….apps.googleusercontent.com`) to upload your Scenering video directly from SceneBoost and receive that newly created video’s URL automatically.
+            </p>
+          </div>
+          <KeyRound size={18} className="muted-icon" />
+        </div>
+        <div className="btn-row">
+          <input
+            type="text"
+            style={{ flex: 1 }}
+            value={oauthClientId}
+            onChange={(e) => setOauthClientId(e.target.value)}
+            placeholder="1234567890-abcdef.apps.googleusercontent.com"
+          />
+          <button
+            type="button"
+            className="btn btn-accent btn-sm"
+            onClick={() => {
+              saveGoogleOAuthClientId(oauthClientId)
+              notify(oauthClientId.trim() ? 'YouTube OAuth Client ID saved ✓' : 'YouTube OAuth Client ID cleared')
+            }}
+          >
+            <Save size={14} /> Save OAuth ID
           </button>
         </div>
       </div>

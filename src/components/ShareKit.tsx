@@ -28,7 +28,7 @@ import {
   type SocialBoostPlatform,
 } from '../lib/scenering'
 import { generateSeoTagsWithGemini, loadGeminiApiKey } from '../lib/gemini'
-import { autoFetchYoutubeVideoForPost, extractYoutubeChannelId } from '../lib/youtube'
+import { autoFetchYoutubeVideoForPost } from '../lib/youtube'
 import { Badge, EmptyState } from './ui'
 
 interface Props {
@@ -93,7 +93,9 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
       checkingRef.current = true
       setYtChecking(true)
       try {
-        const res = await autoFetchYoutubeVideoForPost(scene, data.scenes, data.platforms)
+        const res = await autoFetchYoutubeVideoForPost(scene, data.scenes, data.platforms, {
+          checkClipboard: manualTrigger,
+        })
         if (res.matched) {
           const nowIso = new Date().toISOString()
           const hasYt = scene.links.some((l) => l.platform === 'youtube')
@@ -126,10 +128,10 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
             updatedAt: nowIso,
           })
           if (manualTrigger || scene.videoUrl !== res.matched.url) {
-            notify(`Fetched YouTube link automatically: ${res.matched.url} ✓`)
+            notify(`Fetched this video’s URL (${res.matched.url}) & placed in all social posts ✓`)
           }
         } else if (manualTrigger) {
-          notify('Not live on your YouTube channel yet — publish on YouTube first')
+          notify('Video not posted on YouTube yet — post it first, then click Fetch This Video’s URL')
         }
       } catch (err) {
         if (manualTrigger) {
@@ -211,7 +213,6 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
   })
   const composerLink = PLATFORM_COMPOSER_LINKS[boostPlatform]
   const hasRealThumbnail = scene.thumbnail.startsWith('data:image/')
-  const channelId = extractYoutubeChannelId(data.platforms)
 
   return (
     <div className="page">
@@ -219,7 +220,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
         <div>
           <h1>Share Kit</h1>
           <p className="page-sub">
-            Publish the 4 items on YouTube first — SceneBoost automatically fetches your YouTube link and locks it into every social post.
+            Post the video &amp; 4 items on YouTube first — SceneBoost fetches that video’s own URL right after posting and places it into all the other social pages’ posts.
           </p>
         </div>
         <div className="btn-row">
@@ -338,14 +339,18 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
             <div className="yt-copy-head" style={{ marginBottom: 6 }}>
               <span>
                 <Lock size={13} style={{ verticalAlign: -2, marginRight: 6 }} />
-                <strong>Automated YouTube Video Link ({channelId})</strong>
+                <strong>
+                  {ytBoostTarget.isSpecificVideo
+                    ? 'This Video’s YouTube URL — Placed in All Social Posts'
+                    : 'After Posting the Video → Fetch That Video’s Own URL'}
+                </strong>
               </span>
               <Badge tone={ytBoostTarget.isSpecificVideo ? 'live' : 'draft'}>
                 {ytBoostTarget.isSpecificVideo
-                  ? '✓ Auto-fetched'
+                  ? '✓ Placed in social posts'
                   : ytChecking
-                  ? 'Checking…'
-                  : 'Waiting for YouTube'}
+                  ? 'Fetching…'
+                  : 'Waiting for video'}
               </Badge>
             </div>
 
@@ -356,7 +361,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
                 </div>
                 <div className="step1-toggles-row">
                   <span className="muted small">
-                    {scene.youtubeFetchedAt ? `Synced ${timeAgo(scene.youtubeFetchedAt)}` : 'Locked to YouTube'}
+                    {scene.youtubeFetchedAt ? `Fetched ${timeAgo(scene.youtubeFetchedAt)}` : 'Placed in all social posts'}
                   </span>
                   <button
                     type="button"
@@ -364,7 +369,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
                     disabled={ytChecking}
                     onClick={() => void syncYoutubeAutomatically(true)}
                   >
-                    <RefreshCw size={13} /> Re-sync from YouTube
+                    <RefreshCw size={13} /> Re-fetch Video URL
                   </button>
                 </div>
               </>
@@ -377,7 +382,7 @@ export default function ShareKit({ data, onEditScene, onUpdateScene, notify }: P
                   onClick={() => void syncYoutubeAutomatically(true)}
                 >
                   <RefreshCw size={13} />{' '}
-                  {ytChecking ? 'Fetching from YouTube…' : 'First post done — Fetch from YouTube'}
+                  {ytChecking ? 'Fetching This Video’s URL…' : 'Video Posted — Fetch This Video’s URL'}
                 </button>
               </div>
             )}

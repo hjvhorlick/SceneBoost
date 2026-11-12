@@ -53,6 +53,7 @@ export default function App() {
   const createFolderRef = useRef<HTMLInputElement | null>(null)
   const createFileRef = useRef<HTMLInputElement | null>(null)
   const createThumbRef = useRef<HTMLInputElement | null>(null)
+  const videoFilesByPostRef = useRef<Map<string, File>>(new Map())
 
   useEffect(() => {
     saveData(data)
@@ -160,8 +161,12 @@ export default function App() {
     const slugBase = slugify(title)
     const exists = data.scenes.some((s) => s.slug === slugBase)
     const hasThumb = Boolean(newThumbDataUrl || imported.thumbnailFoundInFolder)
+    const sceneId = uid()
+    if (imported.videoFile) {
+      videoFilesByPostRef.current.set(sceneId, imported.videoFile)
+    }
     const scene: Scene = {
-      id: uid(),
+      id: sceneId,
       title,
       slug: exists ? `${slugBase}-${uid().slice(0, 4)}` : slugBase,
       description: imported.shortDescription || '',
@@ -359,6 +364,10 @@ export default function App() {
           (editorScene ? (
             <SceneEditor
               scene={editorScene}
+              initialVideoFile={videoFilesByPostRef.current.get(editorScene.id) ?? null}
+              onRememberVideoFile={(postId, file) => {
+                videoFilesByPostRef.current.set(postId, file)
+              }}
               data={data}
               onBack={() => navigate('posts')}
               onSave={saveScene}

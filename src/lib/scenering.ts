@@ -680,6 +680,11 @@ export function isSpecificYoutubeVideoUrl(url: string): boolean {
   )
 }
 
+export function toCanonicalYoutubeVideoUrl(url: string): string {
+  const id = extractYoutubeVideoId(url)
+  return id ? `https://youtu.be/${id}` : url.trim()
+}
+
 export function resolveYoutubeBoostUrl(
   scene: Pick<Scene, 'videoUrl' | 'links'>,
   platforms?: PlatformSettings[]
@@ -691,20 +696,24 @@ export function resolveYoutubeBoostUrl(
 
   const candidateVideo = scene.videoUrl?.trim() || ''
   if (candidateVideo && isSpecificYoutubeVideoUrl(candidateVideo)) {
-    return { url: candidateVideo, isSpecificVideo: true, channelUrl }
+    return {
+      url: toCanonicalYoutubeVideoUrl(candidateVideo),
+      isSpecificVideo: true,
+      channelUrl,
+    }
   }
 
   const ytLink = scene.links.find((l) => l.platform === 'youtube' && l.enabled && l.url.trim())
   if (ytLink && isSpecificYoutubeVideoUrl(ytLink.url)) {
-    return { url: ytLink.url.trim(), isSpecificVideo: true, channelUrl }
-  }
-
-  if (candidateVideo) {
-    return { url: candidateVideo, isSpecificVideo: false, channelUrl }
+    return {
+      url: toCanonicalYoutubeVideoUrl(ytLink.url),
+      isSpecificVideo: true,
+      channelUrl,
+    }
   }
 
   return {
-    url: ytLink?.url.trim() || channelUrl,
+    url: '',
     isSpecificVideo: false,
     channelUrl,
   }
