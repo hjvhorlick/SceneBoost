@@ -34,7 +34,7 @@ The owner's real profiles are pre-configured (see `YOUTUBE_URL` / `TIKTOK_URL` /
 | LinkedIn | https://www.linkedin.com/company/145348282 |
 | TikTok | https://www.tiktok.com/@scenering.com |
 
-Instagram, X, Spotify and Website still use demo handles — update them in **Platforms** (or provide the URLs to be wired into the seed). Existing browsers with demo data are migrated automatically on load (only exact demo values are replaced; your own scenes/links are untouched).
+X and Website still use demo handles — update them in **Platforms** (or provide the URLs to be wired into the seed). Instagram and Spotify are intentionally left disconnected (owner will not add them); they remain available as platform options if needed later. Existing browsers with demo data are migrated automatically on load (only exact demo values are replaced; your own scenes/links are untouched).
 
 ---
 

@@ -51,8 +51,6 @@ function seed(): AppData {
       links: [
         mkLink('youtube', 'Watch on YouTube', YOUTUBE_URL, 4821, 0),
         mkLink('tiktok', 'Watch on TikTok', TIKTOK_URL, 3104, 1),
-        mkLink('instagram', 'Reel — behind the scenes', 'https://instagram.com/reel/neon-nights', 2210, 2),
-        mkLink('spotify', 'Stream the track', 'https://open.spotify.com/track/neon-nights', 1876, 3),
         mkLink('x', 'Post the teaser', 'https://x.com/sceneboost/status/neon-nights', 940, 4),
         mkLink('website', 'Get the vinyl — limited drop', 'https://shop.sceneboost.co/neon-nights', 612, 5),
       ],
@@ -72,7 +70,6 @@ function seed(): AppData {
       links: [
         mkLink('youtube', 'Watch on YouTube', YOUTUBE_URL, 1980, 0),
         mkLink('tiktok', 'Watch on TikTok', TIKTOK_URL, 1540, 1),
-        mkLink('instagram', 'Photo carousel', 'https://instagram.com/p/studio-04', 980, 2),
         mkLink('facebook', 'Visit our Facebook', FACEBOOK_URL, 430, 3),
         mkLink('linkedin', 'Visit our LinkedIn', LINKEDIN_URL, 210, 4),
       ],
@@ -90,7 +87,6 @@ function seed(): AppData {
       createdAt: iso(1),
       updatedAt: iso(0, 1),
       links: [
-        mkLink('instagram', 'Teaser reel', 'https://instagram.com/reel/summer-drop', 0, 0),
         mkLink('tiktok', 'Watch on TikTok', TIKTOK_URL, 0, 1),
         mkLink('website', 'Join the waitlist', 'https://shop.sceneboost.co/waitlist', 0, 2),
       ],
@@ -102,11 +98,11 @@ function seed(): AppData {
     platforms: [
       { id: 'youtube', connected: true, defaultHandle: YOUTUBE_URL },
       { id: 'tiktok', connected: true, defaultHandle: TIKTOK_URL },
-      { id: 'instagram', connected: true, defaultHandle: '@sceneboost' },
+      { id: 'instagram', connected: false, defaultHandle: '' },
       { id: 'facebook', connected: true, defaultHandle: FACEBOOK_URL },
       { id: 'x', connected: true, defaultHandle: '@sceneboost' },
       { id: 'linkedin', connected: true, defaultHandle: LINKEDIN_URL },
-      { id: 'spotify', connected: true, defaultHandle: 'SceneBoost' },
+      { id: 'spotify', connected: false, defaultHandle: '' },
       { id: 'website', connected: true, defaultHandle: 'shop.sceneboost.co' },
     ],
     settings: {
@@ -128,7 +124,8 @@ function seed(): AppData {
 
 /**
  * One-time migration: browsers that already loaded the demo seed get the
- * owner's real YouTube / TikTok / Facebook / LinkedIn profiles without losing any
+ * owner's real YouTube / TikTok / Facebook / LinkedIn profiles (Instagram/Spotify
+ * left disconnected per owner) without losing any
  * scenes or clicks they created. Only exact demo values are replaced —
  * user-customised handles and links are left untouched.
  */
@@ -142,6 +139,10 @@ function migrateDemoProfiles(data: AppData): AppData {
   const demoHandleValues = new Set(['@sceneboost', 'SceneBoost', ''])
 
   const platforms = data.platforms.map((p) => {
+    // Owner will not add Instagram/Spotify — leave them disconnected.
+    if ((p.id === 'instagram' || p.id === 'spotify') && demoHandleValues.has(p.defaultHandle)) {
+      return { ...p, connected: false, defaultHandle: '' }
+    }
     const replacement = demoHandles[p.id]
     if (!replacement) return p
     if (p.id === 'linkedin') {
@@ -155,10 +156,14 @@ function migrateDemoProfiles(data: AppData): AppData {
   const scenes = data.scenes.map((scene) => ({
     ...scene,
     videoUrl: DEMO_URL_MIGRATION[scene.videoUrl] ?? scene.videoUrl,
-    links: scene.links.map((link) => ({
-      ...link,
-      url: DEMO_URL_MIGRATION[link.url] ?? link.url,
-    })),
+    links: scene.links.map((link) => {
+      const url = DEMO_URL_MIGRATION[link.url] ?? link.url
+      // Hide demo Instagram/Spotify links (owner will not add them).
+      const isDemoIgSpotify =
+        (link.platform === 'instagram' || link.platform === 'spotify') &&
+        url.toLowerCase().includes('sceneboost')
+      return isDemoIgSpotify ? { ...link, url, enabled: false } : { ...link, url }
+    }),
   }))
 
   return { ...data, platforms, scenes }
