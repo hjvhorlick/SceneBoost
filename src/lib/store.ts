@@ -7,6 +7,7 @@ const KEY = 'scenboost_data_v1'
 export const YOUTUBE_URL = 'https://www.youtube.com/channel/UCV9v30xQPdbhwM5lAZC2MRQ'
 export const FACEBOOK_URL = 'https://www.facebook.com/profile.php?id=61595379711660'
 export const LINKEDIN_URL = 'https://www.linkedin.com/company/145348282'
+export const TIKTOK_URL = 'https://www.tiktok.com/@scenering.com'
 
 // Old demo link URLs -> real profile URLs (used for seed + one-time migration).
 const DEMO_URL_MIGRATION: Record<string, string> = {
@@ -14,6 +15,9 @@ const DEMO_URL_MIGRATION: Record<string, string> = {
   'https://youtube.com/watch?v=studio-sessions-04': YOUTUBE_URL,
   'https://facebook.com/sceneboost/videos/studio-04': FACEBOOK_URL,
   'https://linkedin.com/posts/sceneboost-studio-04': LINKEDIN_URL,
+  'https://tiktok.com/@sceneboost/video/neon-nights': TIKTOK_URL,
+  'https://tiktok.com/@sceneboost/video/studio-04': TIKTOK_URL,
+  'https://tiktok.com/@sceneboost/video/summer-drop': TIKTOK_URL,
 }
 
 function seed(): AppData {
@@ -46,7 +50,7 @@ function seed(): AppData {
       updatedAt: iso(0, 3),
       links: [
         mkLink('youtube', 'Watch on YouTube', YOUTUBE_URL, 4821, 0),
-        mkLink('tiktok', 'Watch the TikTok cut', 'https://tiktok.com/@sceneboost/video/neon-nights', 3104, 1),
+        mkLink('tiktok', 'Watch on TikTok', TIKTOK_URL, 3104, 1),
         mkLink('instagram', 'Reel — behind the scenes', 'https://instagram.com/reel/neon-nights', 2210, 2),
         mkLink('spotify', 'Stream the track', 'https://open.spotify.com/track/neon-nights', 1876, 3),
         mkLink('x', 'Post the teaser', 'https://x.com/sceneboost/status/neon-nights', 940, 4),
@@ -60,17 +64,17 @@ function seed(): AppData {
       description:
         'Inside the room where Neon Nights was mixed. Full episode on YouTube, highlights on TikTok and Instagram.',
       thumbnail: 'ocean',
-      videoUrl: 'https://youtube.com/watch?v=studio-sessions-04',
+      videoUrl: YOUTUBE_URL,
       status: 'live',
       accent: '#00C9FF',
       createdAt: iso(6),
       updatedAt: iso(1, 5),
       links: [
-        mkLink('youtube', 'Full episode', 'https://youtube.com/watch?v=studio-sessions-04', 1980, 0),
-        mkLink('tiktok', 'Best 60 seconds', 'https://tiktok.com/@sceneboost/video/studio-04', 1540, 1),
+        mkLink('youtube', 'Watch on YouTube', YOUTUBE_URL, 1980, 0),
+        mkLink('tiktok', 'Watch on TikTok', TIKTOK_URL, 1540, 1),
         mkLink('instagram', 'Photo carousel', 'https://instagram.com/p/studio-04', 980, 2),
-        mkLink('facebook', 'Watch on Facebook', 'https://facebook.com/sceneboost/videos/studio-04', 430, 3),
-        mkLink('linkedin', 'Read the case study', 'https://linkedin.com/posts/sceneboost-studio-04', 210, 4),
+        mkLink('facebook', 'Visit our Facebook', FACEBOOK_URL, 430, 3),
+        mkLink('linkedin', 'Visit our LinkedIn', LINKEDIN_URL, 210, 4),
       ],
     },
     {
@@ -87,7 +91,7 @@ function seed(): AppData {
       updatedAt: iso(0, 1),
       links: [
         mkLink('instagram', 'Teaser reel', 'https://instagram.com/reel/summer-drop', 0, 0),
-        mkLink('tiktok', 'Countdown video', 'https://tiktok.com/@sceneboost/video/summer-drop', 0, 1),
+        mkLink('tiktok', 'Watch on TikTok', TIKTOK_URL, 0, 1),
         mkLink('website', 'Join the waitlist', 'https://shop.sceneboost.co/waitlist', 0, 2),
       ],
     },
@@ -96,12 +100,12 @@ function seed(): AppData {
   return {
     scenes,
     platforms: [
-      { id: 'youtube', connected: true, defaultHandle: '@sceneboost' },
-      { id: 'tiktok', connected: true, defaultHandle: '@sceneboost' },
+      { id: 'youtube', connected: true, defaultHandle: YOUTUBE_URL },
+      { id: 'tiktok', connected: true, defaultHandle: TIKTOK_URL },
       { id: 'instagram', connected: true, defaultHandle: '@sceneboost' },
-      { id: 'facebook', connected: true, defaultHandle: 'SceneBoost' },
+      { id: 'facebook', connected: true, defaultHandle: FACEBOOK_URL },
       { id: 'x', connected: true, defaultHandle: '@sceneboost' },
-      { id: 'linkedin', connected: false, defaultHandle: '' },
+      { id: 'linkedin', connected: true, defaultHandle: LINKEDIN_URL },
       { id: 'spotify', connected: true, defaultHandle: 'SceneBoost' },
       { id: 'website', connected: true, defaultHandle: 'shop.sceneboost.co' },
     ],
@@ -124,13 +128,14 @@ function seed(): AppData {
 
 /**
  * One-time migration: browsers that already loaded the demo seed get the
- * owner's real YouTube / Facebook / LinkedIn profiles without losing any
+ * owner's real YouTube / TikTok / Facebook / LinkedIn profiles without losing any
  * scenes or clicks they created. Only exact demo values are replaced —
  * user-customised handles and links are left untouched.
  */
 function migrateDemoProfiles(data: AppData): AppData {
   const demoHandles: Record<string, string> = {
     youtube: YOUTUBE_URL,
+    tiktok: TIKTOK_URL,
     facebook: FACEBOOK_URL,
     linkedin: LINKEDIN_URL,
   }

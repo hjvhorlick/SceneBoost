@@ -25,15 +25,16 @@ Data is persisted in the browser via `localStorage` (`scenboost_data_v1`) and se
 
 ### Configured profiles
 
-The owner's real profiles are pre-configured (see `YOUTUBE_URL` / `FACEBOOK_URL` / `LINKEDIN_URL` in `src/lib/store.ts`):
+The owner's real profiles are pre-configured (see `YOUTUBE_URL` / `TIKTOK_URL` / `FACEBOOK_URL` / `LINKEDIN_URL` in `src/lib/store.ts`):
 
 | Platform | URL |
 |---|---|
 | YouTube | https://www.youtube.com/channel/UCV9v30xQPdbhwM5lAZC2MRQ |
 | Facebook | https://www.facebook.com/profile.php?id=61595379711660 |
 | LinkedIn | https://www.linkedin.com/company/145348282 |
+| TikTok | https://www.tiktok.com/@scenering.com |
 
-TikTok, Instagram, X, Spotify and Website still use demo handles — update them in **Platforms** (or provide the URLs to be wired into the seed). Existing browsers with demo data are migrated automatically on load (only exact demo values are replaced; your own scenes/links are untouched).
+Instagram, X, Spotify and Website still use demo handles — update them in **Platforms** (or provide the URLs to be wired into the seed). Existing browsers with demo data are migrated automatically on load (only exact demo values are replaced; your own scenes/links are untouched).
 
 ---
 
