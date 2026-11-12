@@ -4,6 +4,11 @@ import { Copy, Check, QrCode, Code2, MessageSquare, ExternalLink, Download } fro
 import type { AppData } from '../types'
 import { buildTrackedUrl, copyText, hubUrl } from '../lib/utils'
 import { platformById } from '../lib/platforms'
+import {
+  POST_TEMPLATE_PLATFORMS,
+  buildPostWording,
+  type PostTemplatePlatform,
+} from '../lib/scenering'
 import { EmptyState, PlatformPill } from './ui'
 
 interface Props {
@@ -15,7 +20,8 @@ export default function ShareKit({ data, notify }: Props) {
   const [selectedId, setSelectedId] = useState<string>(data.scenes[0]?.id ?? '')
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [copied, setCopied] = useState<string | null>(null)
-  const [templatePlatform, setTemplatePlatform] = useState<'x' | 'threads' | 'facebook' | 'linkedin' | 'whatsapp'>('x')
+  const [templatePlatform, setTemplatePlatform] = useState<PostTemplatePlatform>('youtube')
+  const [includeCredits, setIncludeCredits] = useState(false)
 
   useEffect(() => {
     if (!selectedId && data.scenes[0]) setSelectedId(data.scenes[0].id)
@@ -61,14 +67,9 @@ export default function ShareKit({ data, notify }: Props) {
     ? `<iframe src="${hub}?embed=1" width="100%" height="640" frameborder="0" title="${scene.title} — SceneBoost"></iframe>`
     : ''
 
-  const postTemplate = (platform: typeof templatePlatform) => {
+  const postTemplate = (platform: PostTemplatePlatform) => {
     if (!scene) return ''
-    const base = `🎬 ${scene.title}\n\n${scene.description}\n\nWatch / stream / share everywhere 👇\n${hub}`
-    if (platform === 'x') return `${base}\n\n#SceneBoost #${scene.slug.replace(/-/g, '')}`
-    if (platform === 'threads') return `${base}\n\nDrop your favourite moment in the replies 👇`
-    if (platform === 'facebook') return `${base}\n\nTap your favourite platform and share the scene you loved most.`
-    if (platform === 'linkedin') return `${scene.title} — now live across every platform.\n\n${scene.description}\n\nOne link, every platform: ${hub}`
-    return `${base}\n\nForward this to anyone who needs to see this scene!`
+    return buildPostWording(scene, hub, platform, includeCredits)
   }
 
   if (!scene) {
@@ -190,21 +191,13 @@ export default function ShareKit({ data, notify }: Props) {
         <div className="card">
           <div className="card-head">
             <div>
-              <h3>Post templates</h3>
-              <p>Ready-to-paste captions per platform</p>
+              <h3>Post wording &amp; captions</h3>
+              <p>Includes this scene’s short description automatically</p>
             </div>
             <MessageSquare size={18} className="muted-icon" />
           </div>
-          <div className="filter-tabs" style={{ marginBottom: 12 }}>
-            {(
-              [
-                ['x', 'X'],
-                ['threads', 'Threads'],
-                ['facebook', 'Facebook'],
-                ['linkedin', 'LinkedIn'],
-                ['whatsapp', 'WhatsApp'],
-              ] as const
-            ).map(([id, label]) => (
+          <div className="filter-tabs" style={{ marginBottom: 12, flexWrap: 'wrap' }}>
+            {POST_TEMPLATE_PLATFORMS.map(([id, label]) => (
               <button
                 key={id}
                 className={`filter-tab ${templatePlatform === id ? 'active' : ''}`}
@@ -214,12 +207,28 @@ export default function ShareKit({ data, notify }: Props) {
               </button>
             ))}
           </div>
+          {!scene.description.trim() && (
+            <p className="muted small" style={{ marginBottom: 8 }}>
+              Tip: import your Scenering saved folder (or type a short description in Scene Editor) and it will appear right in this post wording.
+            </p>
+          )}
+          {scene.credits?.trim() &&
+            (templatePlatform === 'youtube' || templatePlatform === 'vimeo' || templatePlatform === 'facebook') && (
+              <label className="inline-check" style={{ marginBottom: 10 }}>
+                <input
+                  type="checkbox"
+                  checked={includeCredits}
+                  onChange={(e) => setIncludeCredits(e.target.checked)}
+                />
+                <span>Append Scenering media credits (<code>📢 CREDITS &amp; ATTRIBUTIONS</code>)</span>
+              </label>
+            )}
           <pre className="code-block tall">{postTemplate(templatePlatform)}</pre>
           <button
             className="btn btn-accent btn-sm"
-            onClick={() => doCopy('template', postTemplate(templatePlatform), 'Post template copied')}
+            onClick={() => doCopy('template', postTemplate(templatePlatform), 'Post wording copied')}
           >
-            {copied === 'template' ? <Check size={14} /> : <Copy size={14} />} Copy template
+            {copied === 'template' ? <Check size={14} /> : <Copy size={14} />} Copy post wording
           </button>
         </div>
       </div>

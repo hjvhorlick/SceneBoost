@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
   Save,
@@ -11,9 +11,18 @@ import {
   Check,
   ExternalLink,
   Copy,
+  FolderOpen,
+  FileText,
+  MessageSquare,
 } from 'lucide-react'
 import type { AppData, PlatformId, Scene, SceneLink } from '../types'
 import { PLATFORMS, GRADIENTS, ACCENTS, platformById } from '../lib/platforms'
+import {
+  POST_TEMPLATE_PLATFORMS,
+  buildPostWording,
+  parseSceneringFiles,
+  type PostTemplatePlatform,
+} from '../lib/scenering'
 import { buildTrackedUrl, copyText, hubUrl, slugify, uid } from '../lib/utils'
 import { Badge, PlatformPill } from './ui'
 
@@ -31,6 +40,38 @@ export default function SceneEditor({ scene, data, onBack, onSave, onDelete, onO
   const [draft, setDraft] = useState<Scene>(scene)
   const [slugTouched, setSlugTouched] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
+  const [wordingPlatform, setWordingPlatform] = useState<PostTemplatePlatform>('youtube')
+  const [includeCredits, setIncludeCredits] = useState(false)
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const handleImportScenering = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const imported = await parseSceneringFiles(files)
+    setDraft((d) => {
+      const shouldUpdateTitle =
+        imported.title && (!d.title.trim() || d.title === 'Untitled scene')
+      const nextTitle = shouldUpdateTitle ? imported.title : d.title
+      const nextSlug =
+        shouldUpdateTitle && !slugTouched ? slugify(imported.title) : d.slug
+      return {
+        ...d,
+        title: nextTitle,
+        slug: nextSlug,
+        description: imported.shortDescription || d.description,
+        credits: imported.credits || d.credits,
+        videoFileName: imported.videoFileName || d.videoFileName,
+        updatedAt: new Date().toISOString(),
+      }
+    })
+    if (imported.shortDescription) {
+      notify(`Loaded short description from ${imported.sourceSummary} ✓`)
+    } else if (imported.title || imported.credits || imported.videoFileName) {
+      notify(`Imported ${imported.sourceSummary} — add or tweak short description below`)
+    } else {
+      notify('No credits or description text found in selected files')
+    }
+  }
 
   useEffect(() => {
     setDraft(scene)
@@ -168,6 +209,58 @@ export default function SceneEditor({ scene, data, onBack, onSave, onDelete, onO
               <Badge tone={draft.status}>{draft.status}</Badge>
             </div>
 
+            <div className="scenering-import-bar">
+              <div>
+                <strong>Scenering saved folder</strong>
+                <p className="muted small">
+                  Pick your <code>Videos/Scenering/&lt;Video Name&gt;</code> folder (or its credits file) to pull the video name, short description and credits straight into this post.
+                </p>
+                {draft.videoFileName && (
+                  <p className="small" style={{ marginTop: 4, color: 'var(--accent)' }}>
+                    🎬 Video in folder: <code>{draft.videoFileName}</code>
+                  </p>
+                )}
+              </div>
+              <div className="btn-row">
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  multiple
+                  style={{ display: 'none' }}
+                  {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+                  onChange={(e) => {
+                    void handleImportScenering(e.target.files)
+                    e.target.value = ''
+                  }}
+                />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".txt,.json,.md"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    void handleImportScenering(e.target.files)
+                    e.target.value = ''
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => folderInputRef.current?.click()}
+                >
+                  <FolderOpen size={14} /> Select folder
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <FileText size={14} /> Credits (.txt)
+                </button>
+              </div>
+            </div>
+
             <label className="field">
               <span>Title</span>
               <input value={draft.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Neon Nights — Official Video" />
@@ -198,12 +291,12 @@ export default function SceneEditor({ scene, data, onBack, onSave, onDelete, onO
             </div>
 
             <label className="field">
-              <span>Description</span>
+              <span>Short description (included in post wording &amp; hub)</span>
               <textarea
                 rows={3}
                 value={draft.description}
                 onChange={(e) => set('description', e.target.value)}
-                placeholder="Tell fans what this scene is about…"
+                placeholder="Short description from your Scenering credits (or write one here — automatically added to every post caption)…"
               />
             </label>
 
@@ -346,6 +439,59 @@ export default function SceneEditor({ scene, data, onBack, onSave, onDelete, onO
                   )
                 })}
             </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head">
+              <div>
+                <h3>Post wording</h3>
+                <p>Ready-to-paste caption with your short description built in</p>
+              </div>
+              <MessageSquare size={18} className="muted-icon" />
+            </div>
+
+            <div className="filter-tabs" style={{ marginBottom: 12, flexWrap: 'wrap' }}>
+              {POST_TEMPLATE_PLATFORMS.map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`filter-tab ${wordingPlatform === id ? 'active' : ''}`}
+                  onClick={() => setWordingPlatform(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {draft.credits?.trim() &&
+              (wordingPlatform === 'youtube' || wordingPlatform === 'vimeo' || wordingPlatform === 'facebook') && (
+                <label className="inline-check" style={{ marginBottom: 10 }}>
+                  <input
+                    type="checkbox"
+                    checked={includeCredits}
+                    onChange={(e) => setIncludeCredits(e.target.checked)}
+                  />
+                  <span>Append Scenering media credits (<code>📢 CREDITS &amp; ATTRIBUTIONS</code>)</span>
+                </label>
+              )}
+
+            <pre className="code-block tall">
+              {buildPostWording(draft, hubUrl(draft.slug), wordingPlatform, includeCredits)}
+            </pre>
+
+            <button
+              type="button"
+              className="btn btn-accent btn-sm"
+              onClick={async () => {
+                const text = buildPostWording(draft, hubUrl(draft.slug), wordingPlatform, includeCredits)
+                const ok = await copyText(text)
+                setCopied('wording')
+                notify(ok ? 'Post wording copied ✓' : 'Copy failed — select the text manually')
+                setTimeout(() => setCopied(null), 1600)
+              }}
+            >
+              {copied === 'wording' ? <Check size={14} /> : <Copy size={14} />} Copy post wording
+            </button>
           </div>
         </div>
 

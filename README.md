@@ -13,11 +13,11 @@ SceneBoost gives creators, artists and brands one smart link per *scene* (a vide
 | Area | What you get |
 |---|---|
 | **Dashboard** | Total clicks, live scenes, active links, connected platforms, top scenes, clicks-by-platform and recent activity |
-| **Scenes** | Full CRUD for scenes — title, slug, description, video URL, thumbnail style, accent colour, live/draft/paused status |
+| **Scenes** | Full CRUD for scenes — title, slug, short description, video URL, thumbnail style, accent colour, live/draft/paused status — plus **1-click import from a Scenering saved folder (`Videos/Scenering/<Video Name>`)** that reads the video name, short description and media credits from the folder's `*_attribution_credits.txt` |
 | **Platform links** | Add a link per platform (YouTube, TikTok, Facebook, LinkedIn, X, Twitch, Kick, Vimeo, Threads, Instagram, Website/Custom), reorder, enable/disable, with automatic UTM parameters |
 | **Public hub** | A shareable page at `#/s/{slug}` with a hero, platform buttons, copy-link and native share — every click is tracked back to the scene + link |
 | **Analytics** | Clicks per platform, per scene and per link, leaderboard, and CSV export |
-| **Share Kit** | Copy hub link, copy tracked per-platform links, downloadable QR code (PNG), embed code, and ready-to-paste post templates for X / Threads / Facebook / LinkedIn / WhatsApp |
+| **Share Kit** | Copy hub link, copy tracked per-platform links, downloadable QR code (PNG), embed code, and ready-to-paste post wording (automatically including the short description + optional Scenering media credits) for YouTube / TikTok / X / Threads / Facebook / LinkedIn / Twitch & Kick / Vimeo / WhatsApp |
 | **Platforms** | Connect/disconnect accounts, store default handles, see how UTMs are built |
 | **Settings** | Brand name, handle, accent colour, default UTM campaign/medium, reset to demo data |
 

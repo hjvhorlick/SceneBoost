@@ -28,6 +28,8 @@ export interface Scene {
   title: string
   slug: string
   description: string
+  credits?: string // optional media attribution block from Scenering credits.txt
+  videoFileName?: string // optional rendered video file detected in Scenering folder
   thumbnail: string // gradient key or image url
   videoUrl: string
   status: SceneStatus

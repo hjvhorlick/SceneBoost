@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FolderOpen, FileText } from 'lucide-react'
 import Sidebar, { type View } from './components/Sidebar'
 import Dashboard from './components/Dashboard'
 import Scenes from './components/Scenes'
@@ -9,6 +10,7 @@ import Platforms from './components/Platforms'
 import Settings from './components/Settings'
 import PublicHub from './components/PublicHub'
 import { Modal, Toast } from './components/ui'
+import { parseSceneringFiles } from './lib/scenering'
 import { loadData, saveData, resetData } from './lib/store'
 import { slugify, uid } from './lib/utils'
 import type { AppData, PlatformId, Scene } from './types'
@@ -37,6 +39,8 @@ export default function App() {
   const [showCreate, setShowCreate] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Scene | null>(null)
+  const createFolderRef = useRef<HTMLInputElement | null>(null)
+  const createFileRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     saveData(data)
@@ -101,6 +105,45 @@ export default function App() {
     setShowCreate(false)
     setNewTitle('')
     notify('Scene created — add your platform links')
+    navigate('editor', scene.id)
+  }
+
+  const createSceneFromScenering = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const imported = await parseSceneringFiles(files)
+    const title = (newTitle.trim() || imported.title || 'Untitled scene').trim()
+    const slugBase = slugify(title)
+    const exists = data.scenes.some((s) => s.slug === slugBase)
+    const scene: Scene = {
+      id: uid(),
+      title,
+      slug: exists ? `${slugBase}-${uid().slice(0, 4)}` : slugBase,
+      description: imported.shortDescription || '',
+      credits: imported.credits || undefined,
+      videoFileName: imported.videoFileName || undefined,
+      thumbnail: 'neon',
+      videoUrl: '',
+      status: 'draft',
+      accent: data.settings.accent,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      links: [],
+    }
+    setData((d) => ({
+      ...d,
+      scenes: [scene, ...d.scenes],
+      activity: [
+        { id: uid(), text: `Scene imported from Scenering: “${title}”`, time: new Date().toISOString(), kind: 'scene' as const },
+        ...d.activity,
+      ].slice(0, 20),
+    }))
+    setShowCreate(false)
+    setNewTitle('')
+    notify(
+      imported.shortDescription
+        ? 'Scene + short description imported from Scenering ✓'
+        : 'Scene created from Scenering folder — add your platform links'
+    )
     navigate('editor', scene.id)
   }
 
@@ -300,11 +343,55 @@ export default function App() {
       </main>
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create a new scene">
-        <p className="muted" style={{ marginBottom: 16 }}>
-          A scene is a video, drop or campaign. You’ll add platform links next.
+        <p className="muted" style={{ marginBottom: 14 }}>
+          Start from your Scenering saved folder (pulls the video title, short description and credits automatically), or enter a title manually.
         </p>
+        <div className="scenering-import-bar" style={{ marginBottom: 14 }}>
+          <div>
+            <strong>Import Scenering folder</strong>
+            <p className="muted small">Reads short description from credits in the same folder</p>
+          </div>
+          <div className="btn-row">
+            <input
+              ref={createFolderRef}
+              type="file"
+              multiple
+              style={{ display: 'none' }}
+              {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+              onChange={(e) => {
+                void createSceneFromScenering(e.target.files)
+                e.target.value = ''
+              }}
+            />
+            <input
+              ref={createFileRef}
+              type="file"
+              accept=".txt,.json,.md"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                void createSceneFromScenering(e.target.files)
+                e.target.value = ''
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => createFolderRef.current?.click()}
+            >
+              <FolderOpen size={14} /> Select folder
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => createFileRef.current?.click()}
+            >
+              <FileText size={14} /> Credits (.txt)
+            </button>
+          </div>
+        </div>
         <label className="field">
-          <span>Scene title</span>
+          <span>Or type scene title</span>
           <input
             autoFocus
             value={newTitle}
